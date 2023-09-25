@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
+from dataclasses import dataclass
 import functools
 import logging
+import queue
 import os
 import shlex
 import shutil
@@ -13,7 +15,7 @@ import time
 import wave
 from collections import deque
 from pathlib import Path
-from typing import Deque, Final, Optional, Tuple
+from typing import Deque, Final, Optional, Tuple, cast
 
 from .mic import (
     ARECORD_WITH_DEVICE,
@@ -30,6 +32,13 @@ from .snd import APLAY_WITH_DEVICE, DEFAULT_APLAY, play_subprocess, play_udp
 from .state import MicState, State
 from .util import multiply_volume
 from .vad import SileroVoiceActivityDetector, VoiceActivityDetector
+
+
+@dataclass
+class PlaybackQueueItem:
+    media: str  # wav url/path to play
+    mic_state: MicState | None = None  # mic state after playing
+
 
 VAD_DISABLED = "disabled"
 _LOGGER = logging.getLogger(__name__)
@@ -147,45 +156,31 @@ async def main() -> None:
         args.debug_recording_dir.mkdir(parents=True, exist_ok=True)
 
     loop = asyncio.get_running_loop()
-    audio_queue: "asyncio.Queue[Tuple[int, bytes]]" = asyncio.Queue()
+    recording_queue: "asyncio.Queue[Tuple[int, bytes]]" = asyncio.Queue()
+    playback_queue: "queue.Queue[Optional[PlaybackQueueItem]]" = queue.Queue()
     speech_detected = asyncio.Event()
     state = State(mic=MicState.WAIT_FOR_VAD)
 
     # Recording thread for microphone
     mic_thread = threading.Thread(
         target=_mic_proc,
-        args=(args, loop, audio_queue, speech_detected, state),
+        args=(args, loop, recording_queue, speech_detected, state),
         daemon=True,
     )
     mic_thread.start()
 
-    # Audio output
-    snd_socket: Optional[socket.socket] = None
+    # Playback thread
+    playback_thread = threading.Thread(
+        target=_playback_proc,
+        args=(args, playback_queue, state),
+        daemon=True,
+    )
+    playback_thread.start()
 
+    # Send requests to the playback thread
     try:
         while state.is_running:
             try:
-                if args.udp_snd is not None:
-                    # UDP socket
-                    if snd_socket is None:
-                        snd_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    play = functools.partial(
-                        play_udp,
-                        udp_socket=snd_socket,
-                        udp_port=args.udp_snd,
-                        state=state,
-                        sample_rate=args.udp_snd_sample_rate,
-                        volume=args.volume,
-                    )
-                else:
-                    # External program
-                    play = functools.partial(
-                        play_subprocess,
-                        command=args.snd_command,
-                        sample_rate=args.snd_command_sample_rate,
-                        volume=args.volume,
-                    )
-
                 if args.vad != VAD_DISABLED:
                     _LOGGER.debug("Waiting for speech")
                     await speech_detected.wait()
@@ -202,7 +197,7 @@ async def main() -> None:
                     protocol=args.protocol,
                     port=args.port,
                     token=args.token,
-                    audio=audio_queue,
+                    audio=recording_queue,
                     pipeline_name=args.pipeline,
                     audio_seconds_to_buffer=args.wake_buffer_seconds,
                 ):
@@ -211,29 +206,36 @@ async def main() -> None:
                     if event_type == "wake_word-end":
                         if args.awake_sound:
                             state.mic = MicState.NOT_RECORDING
-                            play(media=args.awake_sound)
-                            state.mic = MicState.RECORDING
+                            playback_queue.put_nowait(
+                                PlaybackQueueItem(
+                                    media=args.awake_sound, mic_state=MicState.RECORDING
+                                )
+                            )
                     elif event_type == "stt-end":
                         # Stop recording until run ends
                         state.mic = MicState.NOT_RECORDING
                         if args.done_sound:
-                            play(media=args.done_sound)
+                            playback_queue.put_nowait(
+                                PlaybackQueueItem(media=args.done_sound)
+                            )
                     elif event_type == "tts-end":
                         # Play TTS output
                         tts_url = event_data.get("tts_output", {}).get("url")
                         if tts_url:
-                            play(
-                                media=f"{args.protocol}://{args.host}:{args.port}{tts_url}"
-                            )
+                            url = f"{args.protocol}://{args.host}:{args.port}{tts_url}"
+                            playback_queue.put_nowait(PlaybackQueueItem(media=url))
                     elif event_type in ("run-end", "error"):
                         # Start recording for next wake word
                         state.mic = MicState.WAIT_FOR_VAD
+
             except Exception:
                 _LOGGER.exception("Unexpected error")
                 state.mic = MicState.WAIT_FOR_VAD
     finally:
         state.is_running = False
         mic_thread.join()
+        playback_queue.put_nowait(None)  # exit request
+        playback_thread.join()
 
 
 # -----------------------------------------------------------------------------
@@ -372,6 +374,51 @@ def _mic_proc(
     except Exception:
         _LOGGER.exception("Unexpected error in _mic_proc")
         os._exit(-1)  # pylint: disable=protected-access
+
+
+# ----------------------------
+
+
+def _playback_proc(
+    args: argparse.Namespace,
+    playback_queue: "queue.Queue[Optional[PlaybackQueueItem]]",
+    state: State,
+) -> None:
+    snd_socket: Optional[socket.socket] = None
+
+    while True:
+        try:
+            if args.udp_snd is not None:
+                # UDP socket
+                if snd_socket is None:
+                    snd_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                play = functools.partial(
+                    play_udp,
+                    udp_socket=snd_socket,
+                    udp_port=args.udp_snd,
+                    state=state,
+                    sample_rate=args.udp_snd_sample_rate,
+                    volume=args.volume,
+                )
+            else:
+                # External program
+                play = functools.partial(
+                    play_subprocess,
+                    command=args.snd_command,
+                    sample_rate=args.snd_command_sample_rate,
+                    volume=args.volume,
+                )
+
+            for item in iter(playback_queue.get, None):
+                play(media=item.media)
+                if item.mic_state:
+                    state.mic = item.mic_state
+
+                return  # we got None from the queue, exit
+
+        except Exception:
+            # log errors but continue, re-opening the stream
+            _LOGGER.error("Sound error in _playback_proc")
 
 
 # -----------------------------------------------------------------------------
