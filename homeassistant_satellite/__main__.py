@@ -2,20 +2,18 @@
 import argparse
 import asyncio
 from dataclasses import dataclass
-import functools
 import logging
 import queue
 import os
 import shlex
 import shutil
-import socket
 import sys
 import threading
 import time
 import wave
 from collections import deque
 from pathlib import Path
-from typing import Deque, Final, Optional, Tuple, cast
+from typing import Deque, Final, Optional, Tuple
 
 from .mic import (
     ARECORD_WITH_DEVICE,
@@ -384,17 +382,11 @@ def _playback_proc(
     playback_queue: "queue.Queue[Optional[PlaybackQueueItem]]",
     state: State,
 ) -> None:
-    snd_socket: Optional[socket.socket] = None
-
     while True:
         try:
             if args.udp_snd is not None:
                 # UDP socket
-                if snd_socket is None:
-                    snd_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                play = functools.partial(
-                    play_udp,
-                    udp_socket=snd_socket,
+                play_ctx = play_udp(
                     udp_port=args.udp_snd,
                     state=state,
                     sample_rate=args.udp_snd_sample_rate,
@@ -402,17 +394,17 @@ def _playback_proc(
                 )
             else:
                 # External program
-                play = functools.partial(
-                    play_subprocess,
+                play_ctx = play_subprocess(
                     command=args.snd_command,
                     sample_rate=args.snd_command_sample_rate,
                     volume=args.volume,
                 )
 
-            for item in iter(playback_queue.get, None):
-                play(media=item.media)
-                if item.mic_state:
-                    state.mic = item.mic_state
+            with play_ctx as play:
+                for item in iter(playback_queue.get, None):
+                    play(media=item.media)
+                    if item.mic_state:
+                        state.mic = item.mic_state
 
                 return  # we got None from the queue, exit
 
