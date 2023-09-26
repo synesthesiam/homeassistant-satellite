@@ -1,5 +1,4 @@
 import logging
-import socket
 import subprocess
 import time
 from typing import Final, Iterable, List, Tuple
@@ -24,6 +23,8 @@ def record_udp(
     samples_per_chunk: int = SAMPLES_PER_CHUNK,
 ) -> Iterable[Tuple[int, bytes]]:
     bytes_per_chunk = samples_per_chunk * WIDTH * CHANNELS
+
+    import socket  # only if needed
 
     udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

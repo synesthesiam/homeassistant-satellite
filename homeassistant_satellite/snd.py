@@ -1,6 +1,5 @@
 import contextlib
 import logging
-import socket
 import subprocess
 from typing import Generator
 import wave
@@ -23,6 +22,8 @@ def play_udp(
 ):
     """Uses ffmpeg to stream raw audio to a UDP port."""
     assert state.mic_host is not None
+
+    import socket  # only if needed
 
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp_socket:
 
