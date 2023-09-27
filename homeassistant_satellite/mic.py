@@ -1,7 +1,7 @@
 import logging
 import subprocess
 import time
-from typing import Final, Iterable, List, Tuple
+from typing import Final, Iterable, List, Optional, Tuple
 
 from .state import State
 
@@ -70,4 +70,30 @@ def record_subprocess(
             if not chunk:
                 break
 
+            yield time.monotonic_ns(), chunk
+
+
+def record_pulseaudio(
+    server: str,
+    device: Optional[str],
+    samples_per_chunk: int = SAMPLES_PER_CHUNK,
+) -> Iterable[Tuple[int, bytes]]:
+    """Yield mic samples with a timestamp."""
+
+    import pasimple  # only if needed
+
+    server_name = server if server != "__default__" else None
+
+    with pasimple.PaSimple(
+        direction=pasimple.PA_STREAM_RECORD,
+        server_name=server_name,
+        device_name=device,
+        app_name="homeassistant_sattelite",
+        format=pasimple.PA_SAMPLE_S16LE,
+        channels=CHANNELS,
+        rate=RATE,
+        fragsize=samples_per_chunk * WIDTH,
+    ) as pa:
+        while True:
+            chunk = pa.read(samples_per_chunk * WIDTH)
             yield time.monotonic_ns(), chunk
