@@ -14,13 +14,13 @@ from collections import deque
 from pathlib import Path
 from typing import Deque, Final, Optional, Tuple
 
-import numpy as np
 import sounddevice as sd
 
 from .mic import CHANNELS, RATE, SAMPLES_PER_CHUNK, WIDTH, record_stream, record_udp
 from .remote import stream
 from .snd import play_stream, play_udp
 from .state import MicState, State
+from .util import multiply_volume
 from .vad import SileroVoiceActivityDetector, VoiceActivityDetector
 
 VAD_DISABLED = "disabled"
@@ -75,6 +75,7 @@ async def main() -> None:
         "--noise-suppression", type=int, default=0, choices=(0, 1, 2, 3, 4)
     )
     parser.add_argument("--auto-gain", type=int, default=0, choices=list(range(32)))
+    parser.add_argument("--volume-multiplier", type=float, default=1.0)
     #
     parser.add_argument("--udp-mic", type=int, help="UDP port to receive input audio")
     parser.add_argument("--udp-snd", type=int, help="UDP port to send output audio")
@@ -243,8 +244,8 @@ def _mic_proc(
         vad_chunk_buffer: Deque[Tuple[int, bytes]] = deque(
             maxlen=args.vad_buffer_chunks
         )
-        sub_chunk_size: Final = 160
-        clean_10ms_array = np.zeros(shape=(sub_chunk_size,), dtype=np.int16)
+        sub_chunk_samples: Final = 160
+        sub_chunk_bytes: Final = sub_chunk_samples * 2  # 16-bit
         wav_writer: Optional[wave.Wave_write] = None
 
         if (
@@ -258,15 +259,13 @@ def _mic_proc(
 
             # Required so we don't need an extra buffer
             assert (
-                SAMPLES_PER_CHUNK % sub_chunk_size
+                SAMPLES_PER_CHUNK % sub_chunk_samples
             ) == 0, "Audio chunks must be a multiple of 10ms"
             _LOGGER.debug("Using webrtc audio processing")
-        elif args.vad == "silero":
+
+        if args.vad == "silero":
             vad = SileroVoiceActivityDetector(args.vad_model)
             _LOGGER.debug("Using silero VAD")
-        else:
-            # Always streaming
-            _LOGGER.debug("No VAD")
 
         if args.udp_mic is not None:
             mic_stream = record_udp(args.udp_mic, state)
@@ -280,32 +279,29 @@ def _mic_proc(
             timestamp, chunk = ts_chunk
             vad_prob = 0.0
 
+            if args.volume_multiplier != 1.0:
+                chunk = multiply_volume(chunk, args.volume_multiplier)
+
             # Process in 10ms sub-chunks.
             if audio_processor is not None:
-                chunk_array = np.frombuffer(chunk, dtype=np.int16)
-                ap_sub_chunks = len(chunk_array) // sub_chunk_size
-                if (len(chunk_array) % sub_chunk_size) != 0:
+                clean_chunk = bytes()
+                ap_sub_chunks = len(chunk) // sub_chunk_bytes
+                if (len(chunk) % sub_chunk_bytes) != 0:
                     _LOGGER.warning("Mic chunk size is not a multiple of 10ms")
 
-                clean_chunk_array = np.zeros_like(chunk_array)
                 for sub_chunk_idx in range(ap_sub_chunks):
-                    sub_chunk_offset = sub_chunk_idx * sub_chunk_size
-                    is_speech = audio_processor.Process10ms(
-                        chunk_array[
-                            sub_chunk_offset : (sub_chunk_offset + sub_chunk_size)
-                        ],
-                        clean_10ms_array,
+                    sub_chunk_offset = sub_chunk_idx * sub_chunk_bytes
+                    result = audio_processor.Process10ms(
+                        chunk[sub_chunk_offset : (sub_chunk_offset + sub_chunk_bytes)]
                     )
-                    clean_chunk_array[
-                        sub_chunk_offset : (sub_chunk_offset + sub_chunk_size)
-                    ] = clean_10ms_array
 
-                    if is_speech:
+                    clean_chunk += result.audio
+                    if result.is_speech:
                         vad_prob = 1.0
 
                 # Overwrite with clean audio
-                chunk = clean_chunk_array.tobytes()
-                ts_chunk = (timestamp, chunk)
+                chunk = clean_chunk
+                ts_chunk = (timestamp, clean_chunk)
 
             if state.mic == MicState.WAIT_FOR_VAD:
                 if wav_writer is not None:

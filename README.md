@@ -79,9 +79,11 @@ Use `--vad webrtcvad` to only stream audio when speech is detected.
 
 ### Audio Enhancements
 
-Use `--noise-suppression <NS>` suppress background noise, such as fans (0-4 with 4 being max suppression).
+Use `--noise-suppression <NS>` suppress background noise, such as fans (0-4 with 4 being max suppression, default: 0).
 
-Use`--auto-gain <AG>` to automatically increase the microphone volume (0-31 with 31 being the loudest).
+Use`--auto-gain <AG>` to automatically increase the microphone volume (0-31 with 31 being the loudest, default: 0).
+
+Use`--volume-multiplier <VM>` to multiply volume by `<VM>` so 2.0 would be twice as loud (default: 1.0).
 
 
 ## Troubleshooting

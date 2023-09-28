@@ -1,4 +1,4 @@
 aiohttp==3.8.4
 sounddevice==0.4.6
 numpy<2
-webrtc-noise-gain==0.0.1
+webrtc-noise-gain==1.2.3
