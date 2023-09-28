@@ -15,3 +15,5 @@ __pycache__/
 
 /output/
 /token.txt
+
+/dist/

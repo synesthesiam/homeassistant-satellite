@@ -38,7 +38,7 @@ setup(
     license="MIT",
     packages=setuptools.find_packages(),
     package_data={
-        "homeassistant_satellite": ["VERSION", "py.typed"],
+        "homeassistant_satellite": ["VERSION", "py.typed", "models/silero_vad.onnx"],
     },
     install_requires=requirements,
     extras_require={"silerovad": ["onnxruntime>=1.11.0,<2"]},

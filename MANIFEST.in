@@ -1,4 +1,3 @@
 include requirements.txt
 include homeassistant_satellite/models/*.onnx
-include homeassistant_satellite/sounds/*.wav
 include VERSION
