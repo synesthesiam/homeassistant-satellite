@@ -32,6 +32,7 @@ setup(
     version=version,
     description="Voice satellite for Home Assistant",
     long_description=long_description,
+    long_description_content_type="text/markdown",
     url="http://github.com/synesthesiam/homeassistant-satellite",
     author="Michael Hansen",
     author_email="mike@rhasspy.org",
