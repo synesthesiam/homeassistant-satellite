@@ -77,6 +77,18 @@ python3 -m sounddevice
 
 Use `--vad webrtcvad` to only stream audio when speech is detected.
 
+Make use of [silero VAD](https://github.com/snakers4/silero-vad/) with:
+
+``` sh
+.venv/bin/pip3 install -r requirements_extra.txt
+```
+
+and
+
+``` sh
+script/run ... --vad silero
+```
+
 ### Audio Enhancements
 
 Use `--noise-suppression <NS>` suppress background noise, such as fans (0-4 with 4 being max suppression, default: 0).
