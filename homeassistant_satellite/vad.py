@@ -33,11 +33,13 @@ class SileroVoiceActivityDetector(VoiceActivityDetector):
 
         onnx_path = str(onnx_path)
 
+        opts = onnxruntime.SessionOptions()
+        opts.inter_op_num_threads = 1
+        opts.intra_op_num_threads = 1
+
         self.session = onnxruntime.InferenceSession(
-            onnx_path, providers=["CPUExecutionProvider"]
+            onnx_path, providers=["CPUExecutionProvider"], sess_options=opts
         )
-        self.session.intra_op_num_threads = 1
-        self.session.inter_op_num_threads = 1
 
         self._h = np.zeros((2, 1, 64)).astype("float32")
         self._c = np.zeros((2, 1, 64)).astype("float32")
