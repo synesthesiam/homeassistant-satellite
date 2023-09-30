@@ -73,8 +73,12 @@ def play_pulseaudio(
 ):
     """Uses ffmpeg and pulseaudio to play a URL to an audio output device."""
 
-    import pasimple  # only if
-    import pulsectl  # needed
+    try:
+        import pasimple
+        import pulsectl
+    except ImportError:
+        _LOGGER.fatal("Please pip install homeassistant_satellite[pulseaudio]")
+        raise
 
     sample_rate = 44100
     server_name = server if server != "__default__" else None
