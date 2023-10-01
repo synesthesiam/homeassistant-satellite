@@ -1,14 +1,20 @@
 import contextlib
 import logging
 import subprocess
-from typing import Generator
+from time import sleep
+from typing import TYPE_CHECKING, Any, Generator
 import wave
 from typing import Final, List
 
+from .mic import APP_NAME
 from .state import State
 
 DEFAULT_APLAY: Final = "aplay -r {rate} -c 1 -f S16_LE -t raw"
 APLAY_WITH_DEVICE: Final = "aplay -D {device} -r {rate} -c 1 -f S16_LE -t raw"
+
+# for typing optional requirements
+if TYPE_CHECKING:
+    import pulsectl
 
 _LOGGER = logging.getLogger()
 
@@ -65,11 +71,82 @@ def play_subprocess(
 
 
 @contextlib.contextmanager
+def _pulseaudio_echo_cancel(
+    enabled: bool,
+    snd_device: str | None,
+    mic_device: str | None,
+    pactl: "pulsectl.Pulse",
+) -> Generator[Any, None, None]:
+    """
+    Load pulseaudio's module-echo-cancel (if enabled) and return the output sink. Unload on exit.
+    """
+
+    srv_info: Any = pactl.server_info()
+
+    sink: Any = pactl.get_sink_by_name(snd_device or srv_info.default_sink_name)
+    source: Any = pactl.get_source_by_name(mic_device or srv_info.default_source_name)
+
+    if not enabled:
+        yield sink
+        return
+
+    ec_module = None
+    ec_sink: Any = None
+    try:
+        # load the module
+        args = f"sink_master={sink.name} source_master={source.name}"
+        _LOGGER.debug("loading module-echo-cancel args=%s", args)
+        ec_module = pactl.module_load("module-echo-cancel", args=args)
+
+        # find the virtual sink and source created by the module
+        ec_sink = next(
+            sink for sink in pactl.sink_list() if sink.owner_module == ec_module
+        )
+        ec_source = next(
+            source for source in pactl.source_list() if source.owner_module == ec_module
+        )
+
+        # streams connected to sink should be moved to ec_sink to get echo
+        # cancelled (this might happen automatically, depending on pulse config,
+        # but we do it ourselves anyway).
+        for stream in pactl.sink_input_list():
+            if stream.sink == sink.index and stream.owner_module != ec_module:
+                _LOGGER.debug("moving stream to %s: %s", ec_sink.name, stream.name)
+                pactl.sink_input_move(stream.index, ec_sink.index)
+
+        # we finally need to use the virtual source for recording. There is a
+        # race condition between this thread that needs to create the virtual
+        # source, and the mic thread using it. A simple solution is to just wait
+        # until the recording stream is created, and then move it to ec_source.
+        def recording_stream():
+            while True:
+                for stream in pactl.source_output_list():
+                    if stream.name == APP_NAME:
+                        return stream
+                sleep(0.1)
+
+        pactl.source_output_move(recording_stream().index, ec_source.index)
+
+        yield ec_sink
+
+    finally:
+        # move streams back to the original sink and unload the module
+        for stream in pactl.sink_input_list():
+            if stream.sink == ec_sink.index:
+                _LOGGER.debug("moving %s back to %s", stream.name, stream.name)
+                pactl.sink_input_move(stream.index, sink.index)
+
+        pactl.module_unload(ec_module)
+
+
+@contextlib.contextmanager
 def play_pulseaudio(
     server: str,
-    device: str | None,
+    snd_device: str | None,
+    mic_device: str | None,
     volume: float = 1.0,
     ducking_volume: float = 0.2,
+    echo_cancel: bool = False,
 ):
     """Uses ffmpeg and pulseaudio to play a URL to an audio output device."""
 
@@ -82,29 +159,24 @@ def play_pulseaudio(
 
     sample_rate = 44100
     server_name = server if server != "__default__" else None
-    app_name = "homeassistant_satellite"
 
-    with pasimple.PaSimple(
+    with pulsectl.Pulse(server=server_name) as pactl, _pulseaudio_echo_cancel(
+        enabled=echo_cancel,
+        pactl=pactl,
+        snd_device=snd_device,
+        mic_device=mic_device,
+    ) as sink, pasimple.PaSimple(
         direction=pasimple.PA_STREAM_PLAYBACK,
         server_name=server_name,
-        device_name=device,
-        app_name=app_name,
+        device_name=sink.name,
+        app_name=APP_NAME,
         format=pasimple.PA_SAMPLE_S16LE,
         channels=1,
         rate=sample_rate,
-    ) as pa, pulsectl.Pulse(server=server_name) as pulse:
-        # find the sink we're using
-        if device:
-            sink = pulse.get_sink_by_name(device)
-        else:
-            server_info = pulse.server_info()
-            sink = pulse.get_sink_by_name(server_info.default_sink_name)
-
-        # set the volume of our own input stream
-        for input in pulse.sink_input_list():
-            if input.name == app_name:
-                pulse.volume_set_all_chans(input, volume)
-                break
+    ) as pa:
+        # set the volume of our own playback stream
+        stream = next(s for s in pactl.sink_input_list() if s.name == APP_NAME)
+        pactl.volume_set_all_chans(stream, volume)
 
         orig_volume = {}  # remember original volume when ducking
 
@@ -120,18 +192,18 @@ def play_pulseaudio(
                 pa.drain()
 
         def duck(enable: bool):
-            for input in pulse.sink_input_list():
+            for stream in pactl.sink_input_list():
                 # we process all inputs of our sink, except our own input
-                if input.sink == sink.index and input.name != app_name:
+                if stream.sink == sink.index and stream.name != APP_NAME:
                     if enable:
-                        orig_volume[input.index] = pulsectl.PulseVolumeInfo(
-                            input.volume.values
+                        orig_volume[stream.index] = pulsectl.PulseVolumeInfo(
+                            stream.volume.values
                         )
-                        pulse.volume_set_all_chans(input, ducking_volume)
+                        pactl.volume_set_all_chans(stream, ducking_volume)
 
-                    elif input.index in orig_volume:
-                        pulse.sink_input_volume_set(
-                            index=input.index, vol=orig_volume.pop(input.index)
+                    elif stream.index in orig_volume:
+                        pactl.sink_input_volume_set(
+                            index=stream.index, vol=orig_volume.pop(stream.index)
                         )
 
         yield play, duck

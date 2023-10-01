@@ -8,6 +8,8 @@ from .state import State
 DEFAULT_ARECORD: Final = "arecord -r 16000 -c 1 -f S16_LE -t raw"
 ARECORD_WITH_DEVICE: Final = "arecord -D {device} -r 16000 -c 1 -f S16_LE -t raw"
 
+APP_NAME: Final = "homeassistant_satellite"
+
 RATE: Final = 16000
 WIDTH: Final = 2
 CHANNELS: Final = 1
@@ -88,7 +90,7 @@ def record_pulseaudio(
         direction=pasimple.PA_STREAM_RECORD,
         server_name=server_name,
         device_name=device,
-        app_name="homeassistant_sattelite",
+        app_name=APP_NAME,
         format=pasimple.PA_SAMPLE_S16LE,
         channels=CHANNELS,
         rate=RATE,

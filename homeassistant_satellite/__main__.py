@@ -135,7 +135,12 @@ async def main() -> None:
     parser.add_argument(
         "--ducking-volume",
         type=float,
-        help="Output volume set while recording",
+        help="Set output volume to this value while recording",
+    )
+    parser.add_argument(
+        "--echo-cancel",
+        action="store_true",
+        help="Enable acoustic echo cancellation",
     )
     #
     parser.add_argument("--udp-mic", type=int, help="UDP port to receive input audio")
@@ -181,6 +186,9 @@ async def main() -> None:
 
     if args.ducking_volume and not args.pulseaudio:
         _LOGGER.fatal("--ducking-volume only available with --pulseaudio")
+        sys.exit(1)
+    if args.echo_cancel and not args.pulseaudio:
+        _LOGGER.fatal("--echo-cancel only available with --pulseaudio")
         sys.exit(1)
 
     if args.debug_recording_dir:
@@ -424,49 +432,50 @@ def _playback_proc(
     playback_queue: "queue.Queue[PlaybackQueueItem]",
     state: State,
 ) -> None:
-    while True:
-        try:
-            if args.udp_snd is not None:
-                # UDP socket
-                play_ctx = play_udp(
-                    udp_port=args.udp_snd,
-                    state=state,
-                    sample_rate=args.udp_snd_sample_rate,
-                    volume=args.volume,
-                )
-            elif args.pulseaudio is not None:
-                # PulseAudio
-                play_ctx = play_pulseaudio(
-                    server=args.pulseaudio,
-                    device=args.snd_device,
-                    volume=args.volume,
-                    ducking_volume=args.ducking_volume,
-                )
-            else:
-                # External program
-                play_ctx = play_subprocess(
-                    command=args.snd_command,
-                    sample_rate=args.snd_command_sample_rate,
-                    volume=args.volume,
-                )
+    try:
+        if args.udp_snd is not None:
+            # UDP socket
+            play_ctx = play_udp(
+                udp_port=args.udp_snd,
+                state=state,
+                sample_rate=args.udp_snd_sample_rate,
+                volume=args.volume,
+            )
+        elif args.pulseaudio is not None:
+            # PulseAudio
+            play_ctx = play_pulseaudio(
+                server=args.pulseaudio,
+                snd_device=args.snd_device,
+                mic_device=args.mic_device,
+                volume=args.volume,
+                ducking_volume=args.ducking_volume,
+                echo_cancel=args.echo_cancel,
+            )
+        else:
+            # External program
+            play_ctx = play_subprocess(
+                command=args.snd_command,
+                sample_rate=args.snd_command_sample_rate,
+                volume=args.volume,
+            )
 
-            with play_ctx as (play, duck):
-                for item in iter(playback_queue.get, None):
-                    match item:
-                        case PlayMedia(media):
-                            play(media=media)
+        with play_ctx as (play, duck):
+            for item in iter(playback_queue.get, None):
+                match item:
+                    case PlayMedia(media):
+                        play(media=media)
 
-                        case SetMicState(mic_state):
-                            state.mic = mic_state
+                    case SetMicState(mic_state):
+                        state.mic = mic_state
 
-                        case Duck(enable):
-                            duck(enable)
+                    case Duck(enable):
+                        duck(enable)
 
-                return  # we got None from the queue, exit
+            return  # we got None from the queue, exit
 
-        except Exception:
-            # log errors but continue, re-opening the stream
-            _LOGGER.exception("Sound error in _playback_proc")
+    except Exception:
+        _LOGGER.exception("Sound error in _playback_proc")
+        raise
 
 
 # -----------------------------------------------------------------------------
