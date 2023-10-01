@@ -94,7 +94,7 @@ def _pulseaudio_echo_cancel(
     ec_sink: Any = None
     try:
         # load the module
-        args = f"sink_master={sink.name} source_master={source.name}"
+        args = f"sink_master={sink.name} source_master={source.name} aec_method=webrtc use_master_format=1"
         _LOGGER.debug("loading module-echo-cancel args=%s", args)
         ec_module = pactl.module_load("module-echo-cancel", args=args)
 
@@ -106,13 +106,23 @@ def _pulseaudio_echo_cancel(
             source for source in pactl.source_list() if source.owner_module == ec_module
         )
 
-        # streams connected to sink should be moved to ec_sink to get echo
-        # cancelled (this might happen automatically, depending on pulse config,
-        # but we do it ourselves anyway).
+        # streams already connected to sink should be moved to ec_sink to get
+        # echo cancelled (this might happen automatically, depending on pulse
+        # config, but we do it ourselves anyway).
         for stream in pactl.sink_input_list():
             if stream.sink == sink.index and stream.owner_module != ec_module:
                 _LOGGER.debug("moving stream to %s: %s", ec_sink.name, stream.name)
                 pactl.sink_input_move(stream.index, ec_sink.index)
+
+        # the usual is to echo cancel the default sink, in which case we set ec_sink as the default
+        # so that future streams are properly echo cancelled.
+        if srv_info.default_sink_name == sink.name:
+            pactl.default_set(ec_sink)
+        else:
+            _LOGGER.warn(
+                "using non-default device with --echo-cancel. Ensure that all apps send audio to %s",
+                ec_sink.name,
+            )
 
         # we finally need to use the virtual source for recording. There is a
         # race condition between this thread that needs to create the virtual
@@ -135,6 +145,10 @@ def _pulseaudio_echo_cancel(
             if stream.sink == ec_sink.index:
                 _LOGGER.debug("moving %s back to %s", stream.name, stream.name)
                 pactl.sink_input_move(stream.index, sink.index)
+
+        # restore the default sink
+        if srv_info.default_sink_name == sink.name:
+            pactl.default_set(sink)
 
         pactl.module_unload(ec_module)
 
