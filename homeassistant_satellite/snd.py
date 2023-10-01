@@ -178,7 +178,7 @@ def play_pulseaudio(
         stream = next(s for s in pactl.sink_input_list() if s.name == APP_NAME)
         pactl.volume_set_all_chans(stream, volume)
 
-        orig_volume = {}  # remember original volume when ducking
+        ducked = {}  # stream index => volume before ducking
 
         def play(media: str):
             with contextlib.closing(
@@ -196,17 +196,22 @@ def play_pulseaudio(
                 # we process all inputs of our sink, except our own input
                 if stream.sink == sink.index and stream.name != APP_NAME:
                     if enable:
-                        orig_volume[stream.index] = pulsectl.PulseVolumeInfo(
-                            stream.volume.values
+                        ducked.setdefault(  # don't update if already ducked
+                            stream.index, pulsectl.PulseVolumeInfo(stream.volume.values)
                         )
                         pactl.volume_set_all_chans(stream, ducking_volume)
 
-                    elif stream.index in orig_volume:
+                    elif stream.index in ducked:
                         pactl.sink_input_volume_set(
-                            index=stream.index, vol=orig_volume.pop(stream.index)
+                            index=stream.index, vol=ducked.pop(stream.index)
                         )
 
-        yield play, duck
+        try:
+            yield play, duck
+        finally:
+            # unduck on exit
+            for index, volume in ducked.items():
+                pactl.sink_input_volume_set(index=index, vol=volume)
 
 
 def media_to_chunks(

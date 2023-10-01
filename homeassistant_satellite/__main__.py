@@ -270,7 +270,7 @@ async def main() -> None:
                         # Start recording for next wake word (after TTS finishes)
                         playback_queue.put_nowait(SetMicState(MicState.WAIT_FOR_VAD))
 
-                        if event_type == "run-end" and args.ducking_volume is not None:
+                        if args.ducking_volume is not None:
                             playback_queue.put_nowait(Duck(False))
 
             except Exception:
