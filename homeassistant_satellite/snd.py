@@ -98,13 +98,21 @@ def _pulseaudio_echo_cancel(
         _LOGGER.debug("loading module-echo-cancel args=%s", args)
         ec_module = pactl.module_load("module-echo-cancel", args=args)
 
-        # find the virtual sink and source created by the module
-        ec_sink = next(
-            sink for sink in pactl.sink_list() if sink.owner_module == ec_module
-        )
-        ec_source = next(
-            source for source in pactl.source_list() if source.owner_module == ec_module
-        )
+        # find the virtual sink and source created by the module (via the owner_module attribute).
+        # In PipeWire owner_module is wrong (bug?) so we fallback to the one with the max index.
+        def find(list: Any, is_source: bool):
+            max = None
+            for s in list:
+                if is_source and s.monitor_of_sink not in [None, 4294967295]:
+                    continue  # ignore monitor sources
+                if s.owner_module == ec_module:
+                    return s
+                if max is None or max.index < s.index:
+                    max = s
+            return max  # fallback to the sink/source with max index
+
+        ec_sink = find(pactl.sink_list(), False)
+        ec_source = find(pactl.source_list(), True)
 
         # streams already connected to sink should be moved to ec_sink to get
         # echo cancelled (this might happen automatically, depending on pulse
@@ -140,17 +148,21 @@ def _pulseaudio_echo_cancel(
         yield ec_sink
 
     finally:
-        # move streams back to the original sink and unload the module
+        # unload module and ensure that streams are move back to the original sink (if they are not moved automatically)
+        to_restore = {
+            s.index for s in pactl.sink_input_list() if s.sink == ec_sink.index
+        }
+
+        pactl.module_unload(ec_module)
+
         for stream in pactl.sink_input_list():
-            if stream.sink == ec_sink.index:
-                _LOGGER.debug("moving %s back to %s", stream.name, stream.name)
+            if stream.index in to_restore and stream.sink != sink.index:
+                _LOGGER.debug("moving %s back to %s", stream.name, sink.name)
                 pactl.sink_input_move(stream.index, sink.index)
 
         # restore the default sink
         if srv_info.default_sink_name == sink.name:
             pactl.default_set(sink)
-
-        pactl.module_unload(ec_module)
 
 
 @contextlib.contextmanager
