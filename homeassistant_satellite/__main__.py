@@ -475,7 +475,7 @@ def _playback_proc(
 
     except Exception:
         _LOGGER.exception("Sound error in _playback_proc")
-        raise
+        os._exit(-1)
 
 
 # -----------------------------------------------------------------------------
