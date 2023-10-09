@@ -3,8 +3,6 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Union
 
-import numpy as np
-
 _RATE = 16000
 _LOGGER = logging.getLogger()
 
@@ -26,6 +24,7 @@ class SileroVoiceActivityDetector(VoiceActivityDetector):
 
     def __init__(self, onnx_path: Union[str, Path]):
         try:
+            import numpy as np
             import onnxruntime
         except ImportError:
             _LOGGER.fatal("Please pip install homeassistant_satellite[silerovad]")
@@ -45,6 +44,12 @@ class SileroVoiceActivityDetector(VoiceActivityDetector):
         self._c = np.zeros((2, 1, 64)).astype("float32")
 
     def reset(self) -> None:
+        try:
+            import numpy as np
+        except ImportError:
+            _LOGGER.fatal("Please pip install homeassistant_satellite[silerovad]")
+            raise
+
         self._h = np.zeros((2, 1, 64)).astype("float32")
         self._c = np.zeros((2, 1, 64)).astype("float32")
 
@@ -53,6 +58,12 @@ class SileroVoiceActivityDetector(VoiceActivityDetector):
 
         Audio must be 16Khz 16-bit mono PCM.
         """
+        try:
+            import numpy as np
+        except ImportError:
+            _LOGGER.fatal("Please pip install homeassistant_satellite[silerovad]")
+            raise
+
         audio_array = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32767.0
 
         if len(audio_array.shape) == 1:

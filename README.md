@@ -18,7 +18,10 @@ Install Python and the required system dependencies:
 
 ``` sh
 sudo apt-get install python3 python3-pip python3-venv \
-                     ffmpeg alsa-utils git
+                     alsa-utils git
+
+sudo apt-get install --no-install-recommends
+                     ffmpeg
 ```
 
 Clone the repository and run the setup script:
