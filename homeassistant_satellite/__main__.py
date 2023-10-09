@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import functools
 import logging
+import shlex
 import shutil
 import socket
 import sys
@@ -16,9 +17,17 @@ from typing import Deque, Final, Optional, Tuple
 
 import sounddevice as sd
 
-from .mic import CHANNELS, RATE, SAMPLES_PER_CHUNK, WIDTH, record_stream, record_udp
+from .mic import (
+    CHANNELS,
+    RATE,
+    SAMPLES_PER_CHUNK,
+    WIDTH,
+    record_stream,
+    record_subprocess,
+    record_udp,
+)
 from .remote import stream
-from .snd import play_stream, play_udp
+from .snd import play_stream, play_subprocess, play_udp
 from .state import MicState, State
 from .util import multiply_volume
 from .vad import SileroVoiceActivityDetector, VoiceActivityDetector
@@ -43,9 +52,25 @@ async def main() -> None:
         choices=("http", "https"),
         help="Home Assistant protocol",
     )
+    #
     parser.add_argument("--device", help="Name/number of microphone/sound device")
     parser.add_argument("--mic-device", help="Name/number of microphone device")
     parser.add_argument("--snd-device", help="Name/number of sound device")
+    #
+    parser.add_argument(
+        "--mic-command",
+        help="External command to run for raw audio data (16Khz, 16-bit mono PCM)",
+    )
+    parser.add_argument(
+        "--snd-command",
+        help="External command to run for raw audio out (see --snd-command-sample-rate)",
+    )
+    parser.add_argument(
+        "--snd-command-sample-rate",
+        type=int,
+        default=22050,
+        help="Sample rate for --snd-command (default: 22050)",
+    )
     #
     parser.add_argument(
         "--awake-sound", help="Audio file to play when wake word is detected"
@@ -83,7 +108,7 @@ async def main() -> None:
         "--udp-snd-sample-rate",
         type=int,
         default=22050,
-        help="Sample rate for UDP output audio",
+        help="Sample rate for UDP output audio (default: 22050)",
     )
     #
     parser.add_argument(
@@ -101,6 +126,13 @@ async def main() -> None:
         _LOGGER.fatal("Please install ffmpeg")
         sys.exit(1)
 
+    if args.mic_command:
+        args.mic_command = shlex.split(args.mic_command)
+
+    if args.snd_command:
+        args.snd_command = shlex.split(args.snd_command)
+
+    # sounddevice
     for device in sd.query_devices():
         _LOGGER.debug(device)
 
@@ -153,6 +185,7 @@ async def main() -> None:
         while state.is_running:
             try:
                 if args.udp_snd is not None:
+                    # UDP socket
                     if snd_socket is None:
                         snd_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                     snd_stream = contextlib.nullcontext()
@@ -164,7 +197,17 @@ async def main() -> None:
                         sample_rate=args.udp_snd_sample_rate,
                         volume=args.volume,
                     )
+                elif args.snd_command:
+                    # External program
+                    snd_stream = contextlib.nullcontext()
+                    play = functools.partial(
+                        play_subprocess,
+                        command=args.snd_command,
+                        sample_rate=args.snd_command_sample_rate,
+                        volume=args.volume,
+                    )
                 else:
+                    # sounddevice
                     snd_stream = sd.RawOutputStream(
                         device=args.snd_device,
                         samplerate=snd_sample_rate,
@@ -268,8 +311,13 @@ def _mic_proc(
             _LOGGER.debug("Using silero VAD")
 
         if args.udp_mic is not None:
+            # UDP socket
             mic_stream = record_udp(args.udp_mic, state)
+        elif args.mic_command:
+            # External program
+            mic_stream = record_subprocess(args.mic_command)
         else:
+            # sounddevice
             mic_stream = record_stream(args.mic_device)
 
         for ts_chunk in mic_stream:
