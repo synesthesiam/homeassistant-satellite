@@ -2,6 +2,7 @@ import logging
 import socket
 import subprocess
 import wave
+from typing import List
 
 import sounddevice as sd
 
@@ -87,4 +88,45 @@ def play_udp(
             chunk = wav_file.readframes(samples_per_chunk)
             while chunk:
                 udp_socket.sendto(chunk, (state.mic_host, udp_port))
+                chunk = wav_file.readframes(samples_per_chunk)
+
+
+def play_subprocess(
+    media: str,
+    command: List[str],
+    sample_rate: int,
+    samples_per_chunk: int = 1024,
+    volume: float = 1.0,
+) -> None:
+    """Uses ffmpeg and sounddevice to play a URL to an audio output device."""
+    ffmpeg_cmd = [
+        "ffmpeg",
+        "-i",
+        media,
+        "-f",
+        "wav",
+        "-ar",
+        str(sample_rate),
+        "-ac",
+        "1",
+        "-filter:a",
+        f"volume={volume}",
+        "-",
+    ]
+    _LOGGER.debug("play ffmpeg: %s", ffmpeg_cmd)
+    _LOGGER.debug("play: %s", command)
+
+    with subprocess.Popen(
+        ffmpeg_cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    ) as ffmpeg_proc, subprocess.Popen(command, stdin=subprocess.PIPE) as snd_proc:
+        assert ffmpeg_proc.stdout is not None
+        assert snd_proc.stdin is not None
+
+        with wave.open(ffmpeg_proc.stdout, "rb") as wav_file:
+            assert wav_file.getsampwidth() == 2
+            chunk = wav_file.readframes(samples_per_chunk)
+            while chunk:
+                snd_proc.stdin.write(chunk)
                 chunk = wav_file.readframes(samples_per_chunk)

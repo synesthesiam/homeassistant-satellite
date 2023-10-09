@@ -1,7 +1,8 @@
 import logging
 import socket
+import subprocess
 import time
-from typing import Final, Iterable, Optional, Tuple, Union
+from typing import Final, Iterable, List, Optional, Tuple, Union
 
 import sounddevice as sd
 
@@ -39,7 +40,7 @@ def record_udp(
     host: str = "0.0.0.0",
     samples_per_chunk: int = SAMPLES_PER_CHUNK,
 ) -> Iterable[Tuple[int, bytes]]:
-    bytes_per_chunk = samples_per_chunk * WIDTH
+    bytes_per_chunk = samples_per_chunk * WIDTH * CHANNELS
 
     udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -67,5 +68,22 @@ def record_udp(
 
                 chunk = audio_buffer[:bytes_per_chunk]
                 audio_buffer = audio_buffer[bytes_per_chunk:]
+
+            yield time.monotonic_ns(), chunk
+
+
+def record_subprocess(
+    command: List[str],
+    samples_per_chunk: int = SAMPLES_PER_CHUNK,
+) -> Iterable[Tuple[int, bytes]]:
+    """Yield mic samples from a subprocess with a timestamp."""
+    _LOGGER.debug("Microphone command: %s", command)
+    bytes_per_chunk = samples_per_chunk * WIDTH * CHANNELS
+    with subprocess.Popen(command, stdout=subprocess.PIPE) as proc:
+        assert proc.stdout is not None
+        while True:
+            chunk = proc.stdout.read(bytes_per_chunk)
+            if not chunk:
+                break
 
             yield time.monotonic_ns(), chunk
