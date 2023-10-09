@@ -409,7 +409,7 @@ def _mic_proc(
 
     except Exception:
         _LOGGER.exception("Unexpected error in _mic_proc")
-        os._exit(-1)
+        os._exit(-1)  # pylint: disable=protected-access
 
 
 # -----------------------------------------------------------------------------
