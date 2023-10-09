@@ -17,8 +17,8 @@ You must have the [openWakeWord add-on](https://my.home-assistant.io/redirect/su
 Install Python and the required system dependencies:
 
 ``` sh
-apt-get install python3 python3-pip python3-venv \
-                ffmpeg libportaudio2
+sudo apt-get install python3 python3-pip python3-venv \
+                     ffmpeg libportaudio2
 ```
 
 Clone the repository and run the setup script:
