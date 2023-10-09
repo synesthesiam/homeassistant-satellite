@@ -42,7 +42,10 @@ setup(
         "homeassistant_satellite": ["VERSION", "py.typed", "models/silero_vad.onnx"],
     },
     install_requires=requirements,
-    extras_require={"silerovad": ["onnxruntime>=1.11.0,<2"]},
+    extras_require={
+        "silerovad": ["onnxruntime>=1.11.0,<2"],
+        "webrtc": ["webrtc-noise-gain==1.2.3"],
+    },
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",

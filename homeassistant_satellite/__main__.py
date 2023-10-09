@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
-import contextlib
 import functools
 import logging
 import os
@@ -16,19 +15,18 @@ from collections import deque
 from pathlib import Path
 from typing import Deque, Final, Optional, Tuple
 
-import sounddevice as sd
-
 from .mic import (
+    ARECORD_WITH_DEVICE,
     CHANNELS,
+    DEFAULT_ARECORD,
     RATE,
     SAMPLES_PER_CHUNK,
     WIDTH,
-    record_stream,
     record_subprocess,
     record_udp,
 )
 from .remote import stream
-from .snd import play_stream, play_subprocess, play_udp
+from .snd import APLAY_WITH_DEVICE, DEFAULT_APLAY, play_subprocess, play_udp
 from .state import MicState, State
 from .util import multiply_volume
 from .vad import SileroVoiceActivityDetector, VoiceActivityDetector
@@ -54,9 +52,8 @@ async def main() -> None:
         help="Home Assistant protocol",
     )
     #
-    parser.add_argument("--device", help="Name/number of microphone/sound device")
-    parser.add_argument("--mic-device", help="Name/number of microphone device")
-    parser.add_argument("--snd-device", help="Name/number of sound device")
+    parser.add_argument("--mic-device", help="Name of ALSA microphone device")
+    parser.add_argument("--snd-device", help="Name of ALSA sound device")
     #
     parser.add_argument(
         "--mic-command",
@@ -127,39 +124,22 @@ async def main() -> None:
         _LOGGER.fatal("Please install ffmpeg")
         sys.exit(1)
 
-    if args.mic_command:
-        args.mic_command = shlex.split(args.mic_command)
+    if args.mic_device and (not args.mic_command):
+        args.mic_command = ARECORD_WITH_DEVICE.format(device=args.mic_device)
 
-    if args.snd_command:
-        args.snd_command = shlex.split(args.snd_command)
+    if not args.mic_command:
+        args.mic_command = DEFAULT_ARECORD
 
-    # sounddevice
-    for device in sd.query_devices():
-        _LOGGER.debug(device)
+    if args.snd_device and (not args.snd_command):
+        args.snd_command = APLAY_WITH_DEVICE.format(
+            device=args.snd_device, rate=args.snd_command_sample_rate
+        )
 
-    args.mic_device = args.mic_device or args.device
-    args.snd_device = args.snd_device or args.device
+    if not args.snd_command:
+        args.snd_command = DEFAULT_APLAY.format(rate=args.snd_command_sample_rate)
 
-    if args.mic_device:
-        try:
-            args.mic_device = int(args.mic_device)
-        except ValueError:
-            pass
-    else:
-        # Default device
-        args.mic_device = None
-
-    if args.snd_device:
-        try:
-            args.snd_device = int(args.snd_device)
-        except ValueError:
-            pass
-    else:
-        # Default device
-        args.snd_device = None
-
-    snd_device_info = sd.query_devices(device=args.snd_device, kind="output")
-    snd_sample_rate = snd_device_info["default_samplerate"]
+    args.mic_command = shlex.split(args.mic_command)
+    args.snd_command = shlex.split(args.snd_command)
 
     if args.debug_recording_dir:
         # Create directory for saving debug audio
@@ -189,7 +169,6 @@ async def main() -> None:
                     # UDP socket
                     if snd_socket is None:
                         snd_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    snd_stream = contextlib.nullcontext()
                     play = functools.partial(
                         play_udp,
                         udp_socket=snd_socket,
@@ -198,27 +177,12 @@ async def main() -> None:
                         sample_rate=args.udp_snd_sample_rate,
                         volume=args.volume,
                     )
-                elif args.snd_command:
+                else:
                     # External program
-                    snd_stream = contextlib.nullcontext()
                     play = functools.partial(
                         play_subprocess,
                         command=args.snd_command,
                         sample_rate=args.snd_command_sample_rate,
-                        volume=args.volume,
-                    )
-                else:
-                    # sounddevice
-                    snd_stream = sd.RawOutputStream(
-                        device=args.snd_device,
-                        samplerate=snd_sample_rate,
-                        channels=1,
-                        dtype="int16",
-                    )
-                    play = functools.partial(
-                        play_stream,
-                        stream=snd_stream,
-                        sample_rate=snd_sample_rate,
                         volume=args.volume,
                     )
 
@@ -233,36 +197,35 @@ async def main() -> None:
 
                     _LOGGER.debug("Speech detected")
 
-                with snd_stream:
-                    async for _timestamp, event_type, event_data in stream(
-                        host=args.host,
-                        token=args.token,
-                        audio=audio_queue,
-                        pipeline_name=args.pipeline,
-                        audio_seconds_to_buffer=args.wake_buffer_seconds,
-                    ):
-                        _LOGGER.debug("%s %s", event_type, event_data)
+                async for _timestamp, event_type, event_data in stream(
+                    host=args.host,
+                    token=args.token,
+                    audio=audio_queue,
+                    pipeline_name=args.pipeline,
+                    audio_seconds_to_buffer=args.wake_buffer_seconds,
+                ):
+                    _LOGGER.debug("%s %s", event_type, event_data)
 
-                        if event_type == "wake_word-end":
-                            if args.awake_sound:
-                                state.mic = MicState.NOT_RECORDING
-                                play(media=args.awake_sound)
-                                state.mic = MicState.RECORDING
-                        elif event_type == "stt-end":
-                            # Stop recording until run ends
+                    if event_type == "wake_word-end":
+                        if args.awake_sound:
                             state.mic = MicState.NOT_RECORDING
-                            if args.done_sound:
-                                play(media=args.done_sound)
-                        elif event_type == "tts-end":
-                            # Play TTS output
-                            tts_url = event_data.get("tts_output", {}).get("url")
-                            if tts_url:
-                                play(
-                                    media=f"{args.protocol}://{args.host}:{args.port}{tts_url}"
-                                )
-                        elif event_type in ("run-end", "error"):
-                            # Start recording for next wake word
-                            state.mic = MicState.WAIT_FOR_VAD
+                            play(media=args.awake_sound)
+                            state.mic = MicState.RECORDING
+                    elif event_type == "stt-end":
+                        # Stop recording until run ends
+                        state.mic = MicState.NOT_RECORDING
+                        if args.done_sound:
+                            play(media=args.done_sound)
+                    elif event_type == "tts-end":
+                        # Play TTS output
+                        tts_url = event_data.get("tts_output", {}).get("url")
+                        if tts_url:
+                            play(
+                                media=f"{args.protocol}://{args.host}:{args.port}{tts_url}"
+                            )
+                    elif event_type in ("run-end", "error"):
+                        # Start recording for next wake word
+                        state.mic = MicState.WAIT_FOR_VAD
             except Exception:
                 _LOGGER.exception("Unexpected error")
                 state.mic = MicState.WAIT_FOR_VAD
@@ -314,12 +277,9 @@ def _mic_proc(
         if args.udp_mic is not None:
             # UDP socket
             mic_stream = record_udp(args.udp_mic, state)
-        elif args.mic_command:
+        else:
             # External program
             mic_stream = record_subprocess(args.mic_command)
-        else:
-            # sounddevice
-            mic_stream = record_stream(args.mic_device)
 
         for ts_chunk in mic_stream:
             if not state.is_running:

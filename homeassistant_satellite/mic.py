@@ -2,11 +2,12 @@ import logging
 import socket
 import subprocess
 import time
-from typing import Final, Iterable, List, Optional, Tuple, Union
-
-import sounddevice as sd
+from typing import Final, Iterable, List, Tuple
 
 from .state import State
+
+DEFAULT_ARECORD: Final = "arecord -r 16000 -c 1 -f S16_LE -t raw"
+ARECORD_WITH_DEVICE: Final = "arecord -D {device} -r 16000 -c 1 -f S16_LE -t raw"
 
 RATE: Final = 16000
 WIDTH: Final = 2
@@ -14,24 +15,6 @@ CHANNELS: Final = 1
 SAMPLES_PER_CHUNK = int(0.03 * RATE)  # 30ms
 
 _LOGGER = logging.getLogger()
-
-
-def record_stream(
-    device: Optional[Union[str, int]],
-    samples_per_chunk: int = SAMPLES_PER_CHUNK,
-) -> Iterable[Tuple[int, bytes]]:
-    """Yield mic samples with a timestamp."""
-    with sd.RawInputStream(
-        device=device,
-        samplerate=RATE,
-        channels=CHANNELS,
-        blocksize=samples_per_chunk,
-        dtype="int16",
-    ) as stream:
-        while True:
-            chunk, _overflowed = stream.read(samples_per_chunk)
-            chunk = bytes(chunk)
-            yield time.monotonic_ns(), chunk
 
 
 def record_udp(

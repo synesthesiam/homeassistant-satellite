@@ -9,7 +9,7 @@ You must have the [openWakeWord add-on](https://my.home-assistant.io/redirect/su
 
 * Python 3.9 or higher
 * ffmpeg
-* libportaudio2 (for [sounddevice](https://python-sounddevice.readthedocs.io))
+* alsa-utils (for `arecord` and `aplay`)
 
 
 ## Installation
@@ -18,7 +18,7 @@ Install Python and the required system dependencies:
 
 ``` sh
 sudo apt-get install python3 python3-pip python3-venv \
-                     ffmpeg libportaudio2
+                     ffmpeg alsa-utils git
 ```
 
 Clone the repository and run the setup script:
@@ -67,20 +67,18 @@ script/run ... --awake-sound sounds/awake.wav --done.wav sounds/done.wav
 
 ### Change Microphone/Speaker
 
-Use `--mic-device <NUMBER>` and `--snd-device <NUMBER>` to change the microphone and speaker. Get a list of devices with:
+Run `arecord -L` to list available input devices. Pick devices that start with `plughw:` because they will perform software audio conversions. Use `--mic-device plughw:...` to use a specific input device.
 
-``` sh
-python3 -m sounddevice
-```
+Run `aplay -L` to list available output devices. Pick devices that start with `plughw:` because they will perform software audio conversions. Use `--snd-device plughw:...` to use a specific output device.
 
 ### Voice Activity Detection
 
 Use `--vad webrtcvad` to only stream audio when speech is detected.
 
-Make use of [silero VAD](https://github.com/snakers4/silero-vad/) with:
+For better (but slower) speech detection, use [silero VAD](https://github.com/snakers4/silero-vad/) with:
 
 ``` sh
-.venv/bin/pip3 install -r requirements_extra.txt
+.venv/bin/pip3 install .[silerovad]
 ```
 
 and
@@ -90,6 +88,12 @@ script/run ... --vad silero
 ```
 
 ### Audio Enhancements
+
+Make use of [webrtc-noise-gain](https://github.com/rhasspy/webrtc-noise-gain) with:
+
+``` sh
+.venv/bin/pip3 install .[webrtc]
+```
 
 Use `--noise-suppression <NS>` suppress background noise, such as fans (0-4 with 4 being max suppression, default: 0).
 

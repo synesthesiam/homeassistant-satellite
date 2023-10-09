@@ -2,51 +2,14 @@ import logging
 import socket
 import subprocess
 import wave
-from typing import List
-
-import sounddevice as sd
+from typing import Final, List
 
 from .state import State
 
+DEFAULT_APLAY: Final = "aplay -r {rate} -c 1 -f S16_LE -t raw"
+APLAY_WITH_DEVICE: Final = "aplay -D {device} -r {rate} -c 1 -f S16_LE -t raw"
+
 _LOGGER = logging.getLogger()
-
-
-def play_stream(
-    media: str,
-    stream: sd.RawOutputStream,
-    sample_rate: int,
-    samples_per_chunk: int = 1024,
-    volume: float = 1.0,
-) -> None:
-    """Uses ffmpeg and sounddevice to play a URL to an audio output device."""
-    cmd = [
-        "ffmpeg",
-        "-i",
-        media,
-        "-f",
-        "wav",
-        "-ar",
-        str(sample_rate),
-        "-ac",
-        "1",
-        "-filter:a",
-        f"volume={volume}",
-        "-",
-    ]
-    _LOGGER.debug("play: %s", cmd)
-
-    with subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    ) as proc:
-        assert proc.stdout is not None
-        with wave.open(proc.stdout, "rb") as wav_file:
-            assert wav_file.getsampwidth() == 2
-            chunk = wav_file.readframes(samples_per_chunk)
-            while chunk:
-                stream.write(chunk)
-                chunk = wav_file.readframes(samples_per_chunk)
 
 
 def play_udp(
@@ -98,7 +61,7 @@ def play_subprocess(
     samples_per_chunk: int = 1024,
     volume: float = 1.0,
 ) -> None:
-    """Uses ffmpeg and sounddevice to play a URL to an audio output device."""
+    """Uses ffmpeg and a subprocess to play a URL to an audio output device."""
     ffmpeg_cmd = [
         "ffmpeg",
         "-i",
