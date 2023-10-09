@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import functools
 import logging
+import os
 import shlex
 import shutil
 import socket
@@ -408,8 +409,7 @@ def _mic_proc(
 
     except Exception:
         _LOGGER.exception("Unexpected error in _mic_proc")
-        state.is_running = False
-        speech_detected.set()
+        os._exit(-1)
 
 
 # -----------------------------------------------------------------------------
