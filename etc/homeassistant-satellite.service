@@ -1,0 +1,12 @@
+[Unit]
+Description=Home Assistant Satellite
+
+[Service]
+Type=forking
+ExecStart=/home/pi/homeassistant-satellite/script/run --host <host> --token <token>
+WorkingDirectory=/home/pi/homeassistant-satellite
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=default.target

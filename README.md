@@ -66,7 +66,7 @@ Use `--awake-sound <WAV>` and `--done-sound <WAV>` to play sounds when the wake 
 For example:
 
 ``` sh
-script/run ... --awake-sound sounds/awake.wav --done.wav sounds/done.wav
+script/run ... --awake-sound sounds/awake.wav --done-sound sounds/done.wav
 ```
 
 ### Change Microphone/Speaker
@@ -77,12 +77,24 @@ Run `aplay -L` to list available output devices. Pick devices that start with `p
 
 ### Voice Activity Detection
 
-Use `--vad webrtcvad` to only stream audio when speech is detected.
-
-For better (but slower) speech detection, use [silero VAD](https://github.com/snakers4/silero-vad/) with:
+For fast but inaccurate speech detection:
 
 ``` sh
-.venv/bin/pip3 install .[silerovad]
+.venv/bin/pip3 install .[webrtc]
+```
+
+and
+
+``` sh
+script/run ... --vad webrtcvad
+```
+
+For much better (but slower) speech detection, use [silero VAD](https://github.com/snakers4/silero-vad/) with:
+
+``` sh
+.venv/bin/pip3 install \
+  --find-links https://synesthesiam.github.io/prebuilt-apps/ \
+  .[silerovad]
 ```
 
 and
@@ -90,6 +102,8 @@ and
 ``` sh
 script/run ... --vad silero
 ```
+
+**NOTE:** The `--find-links` option is only necessary on 32-bit ARM systems because Microsoft does not build `onnxruntime` wheels for them.
 
 ### Audio Enhancements
 
@@ -105,6 +119,51 @@ Use`--auto-gain <AG>` to automatically increase the microphone volume (0-31 with
 
 Use`--volume-multiplier <VM>` to multiply volume by `<VM>` so 2.0 would be twice as loud (default: 1.0).
 
+
+## Running as a Service
+
+You can run homeassistant-satellite as a systemd service by first creating a service file:
+
+``` sh
+sudo systemctl edit --force --full homeassistant-satellite.service
+```
+
+Paste in the following template, and change both `/home/pi/homeassistant-satellite` and the `script/run` arguments to match your set up:
+
+``` text
+[Unit]
+Description=Home Assistant Satellite
+
+[Service]
+Type=forking
+ExecStart=/home/pi/homeassistant-satellite/script/run --host <host> --token <token>
+WorkingDirectory=/home/pi/homeassistant-satellite
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=default.target
+```
+
+Save the file and exit your editor. Next, enable the service to start at boot and run it:
+
+``` sh
+sudo systemctl enable --now homeassistant-satellite.service
+```
+
+(you may need to hit CTRL+C to get back to a shell prompt)
+
+With the service running, you can view logs in real-time with:
+
+``` sh
+journalctl -u homeassistant-satellite.service -f
+```
+
+Disable and stop the service with:
+
+``` sh
+sudo systemctl disable --now homeassistant-satellite.service
+```
 
 ## Troubleshooting
 

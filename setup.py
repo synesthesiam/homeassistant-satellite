@@ -43,7 +43,7 @@ setup(
     },
     install_requires=requirements,
     extras_require={
-        "silerovad": ["onnxruntime>=1.11.0,<2", "numpy<1.26"],
+        "silerovad": ["onnxruntime>=1.10.0,<2", "numpy<1.26"],
         "webrtc": ["webrtc-noise-gain==1.2.3"],
     },
     classifiers=[
