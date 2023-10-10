@@ -17,6 +17,7 @@ You must have the [openWakeWord add-on](https://my.home-assistant.io/redirect/su
 Install Python and the required system dependencies:
 
 ``` sh
+sudo apt-get update
 sudo apt-get install python3 python3-pip python3-venv \
                      alsa-utils git
 
