@@ -135,10 +135,10 @@ Paste in the following template, and change both `/home/pi/homeassistant-satelli
 Description=Home Assistant Satellite
 
 [Service]
-Type=forking
+Type=simpile
 ExecStart=/home/pi/homeassistant-satellite/script/run --host <host> --token <token>
 WorkingDirectory=/home/pi/homeassistant-satellite
-Restart=on-failure
+Restart=always
 RestartSec=1
 
 [Install]
