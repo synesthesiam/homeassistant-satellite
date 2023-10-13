@@ -70,7 +70,6 @@ async def _get_pipeline_id(
     websocket, message_id: int, pipeline_name: str
 ) -> Tuple[int, Optional[str]]:
     """Resolves pipeline id by name."""
-    pipeline_id: Optional[str] = None
     await websocket.send_json(
         {
             "type": "assist_pipeline/pipeline/list",
@@ -82,10 +81,9 @@ async def _get_pipeline_id(
     message_id += 1
 
     pipelines = msg["result"]["pipelines"]
-    for pipeline in pipelines:
-        if pipeline["name"] == pipeline_name:
-            pipeline_id = pipeline["id"]
-            break
+    pipeline_id = _find_pipeline_by_name(
+        pipeline_name, {p["name"]: p for p in pipelines}
+    )
 
     if not pipeline_id:
         _LOGGER.warning("No pipeline named %s in %s", pipeline_name, pipelines)
@@ -190,3 +188,24 @@ async def _audio_to_events(
 
     for task in pending:
         task.cancel()
+
+
+def _find_pipeline_by_name(name: str, pipelines: Dict[str, Any]) -> Optional[str]:
+    """Return pipeline id for a name. Try exact match first, following by normalized match."""
+    pipeline_info = pipelines.get(name)
+    if pipeline_info is not None:
+        # Exact match
+        return pipeline_info["id"]
+
+    # Normalize and check again
+    name_norm = _normalize_pipeline_name(name)
+    for pipeline_name, pipeline_info in pipelines.items():
+        pipeline_name_norm = _normalize_pipeline_name(pipeline_name)
+        if name_norm == pipeline_name_norm:
+            return pipeline_info["id"]
+
+    return None
+
+
+def _normalize_pipeline_name(name: str) -> str:
+    return name.strip().casefold()

@@ -69,6 +69,10 @@ For example:
 script/run ... --awake-sound sounds/awake.wav --done-sound sounds/done.wav
 ```
 
+### Pipeline Name
+
+The preferred pipeline will be run by default, but you change this with `--pipeline <NAME>` where `<NAME>` is the name of the pipeline you'd like to run instead.
+
 ### Change Microphone/Speaker
 
 Run `arecord -L` to list available input devices. Pick devices that start with `plughw:` because they will perform software audio conversions. Use `--mic-device plughw:...` to use a specific input device.
