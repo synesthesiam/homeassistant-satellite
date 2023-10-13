@@ -123,6 +123,10 @@ Use`--auto-gain <AG>` to automatically increase the microphone volume (0-31 with
 
 Use`--volume-multiplier <VM>` to multiply volume by `<VM>` so 2.0 would be twice as loud (default: 1.0).
 
+### HTTPS
+
+If your Home Assistant server uses https, you will need to add `--protocol https` to your command.
+
 
 ## Running as a Service
 
