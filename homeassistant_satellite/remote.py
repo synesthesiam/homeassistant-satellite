@@ -11,6 +11,7 @@ _LOGGER = logging.getLogger(__name__)
 
 async def stream(
     host: str,
+    protocol: str,
     token: str,
     audio: "asyncio.Queue[Tuple[int, bytes]]",
     pipeline_name: Optional[str] = None,
@@ -19,7 +20,8 @@ async def stream(
     audio_seconds_to_buffer: float = 0,
 ) -> AsyncGenerator[Tuple[int, str, Dict[str, Any]], None]:
     """Streams audio to an Assist pipeline and yields events as (timestamp, type, data)."""
-    url = f"ws://{host}:{port}{api_path}/websocket"
+    ws_protocol = "wss" if protocol == "https" else "ws"
+    url = f"{ws_protocol}://{host}:{port}{api_path}/websocket"
     message_id = 1
 
     async with aiohttp.ClientSession() as session:
