@@ -137,6 +137,8 @@ Paste in the following template, and change both `/home/pi/homeassistant-satelli
 ``` text
 [Unit]
 Description=Home Assistant Satellite
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
