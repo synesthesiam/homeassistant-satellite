@@ -135,7 +135,7 @@ Paste in the following template, and change both `/home/pi/homeassistant-satelli
 Description=Home Assistant Satellite
 
 [Service]
-Type=simpile
+Type=simple
 ExecStart=/home/pi/homeassistant-satellite/script/run --host <host> --token <token>
 WorkingDirectory=/home/pi/homeassistant-satellite
 Restart=always
