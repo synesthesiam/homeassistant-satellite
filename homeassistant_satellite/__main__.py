@@ -199,6 +199,8 @@ async def main() -> None:
 
                 async for _timestamp, event_type, event_data in stream(
                     host=args.host,
+                    protocol=args.protocol,
+                    port=args.port,
                     token=args.token,
                     audio=audio_queue,
                     pipeline_name=args.pipeline,
