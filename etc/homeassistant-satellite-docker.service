@@ -1,0 +1,11 @@
+[Unit]
+Description=Home Assistant Satellite Docker
+
+[Service]
+Type=simple
+ExecStart=docker run --rm --name "homeassistant-satellite" -ti --device /dev/snd --group-add=audio ghcr.io/synesthesiam/homeassistant-satellite:latest --host <host> --token <token>
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=default.target
