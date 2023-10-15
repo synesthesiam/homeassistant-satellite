@@ -183,7 +183,9 @@ def play_pulseaudio(
         _LOGGER.fatal("Please pip install homeassistant_satellite[pulseaudio]")
         raise
 
-    sample_rate = 44100
+    # Open the pulsectl connection (for controlling the server) and setup echo
+    # cancel. The playback stream (pasimple) opens only when playing media.
+
     server_name = server if server != "__default__" else None
 
     with pulsectl.Pulse(server=server_name) as pactl, _pulseaudio_echo_cancel(
@@ -191,28 +193,33 @@ def play_pulseaudio(
         pactl=pactl,
         snd_device=snd_device,
         mic_device=mic_device,
-    ) as sink, pasimple.PaSimple(
-        direction=pasimple.PA_STREAM_PLAYBACK,
-        server_name=server_name,
-        device_name=sink.name,
-        app_name=APP_NAME,
-        format=pasimple.PA_SAMPLE_S16LE,
-        channels=1,
-        rate=sample_rate,
-    ) as pa:
-        # set the volume of our own playback stream
-        stream = next(s for s in pactl.sink_input_list() if s.name == APP_NAME)
-        pactl.volume_set_all_chans(stream, volume)
-
+    ) as sink:
         ducked = {}  # stream index => volume before ducking
 
         def play(media: str):
-            with contextlib.closing(
+            # The playback rate can be arbitrary since ffmpeg resamples to that
+            # rate. In the future we could remove ffmpeg by opening directly the
+            # wav file and setting the sample rate to that of the wav data.
+            sample_rate = 22050
+
+            with pasimple.PaSimple(
+                direction=pasimple.PA_STREAM_PLAYBACK,
+                server_name=server_name,
+                device_name=sink.name,
+                app_name=APP_NAME,
+                format=pasimple.PA_SAMPLE_S16LE,
+                channels=1,
+                rate=sample_rate,
+            ) as pa, contextlib.closing(
                 media_to_chunks(
                     media=media,
                     sample_rate=sample_rate,
                 )
             ) as chunks:
+                # set the volume of our own playback stream
+                stream = next(s for s in pactl.sink_input_list() if s.name == APP_NAME)
+                pactl.volume_set_all_chans(stream, volume)
+
                 for chunk in chunks:
                     pa.write(chunk)
                 pa.drain()
