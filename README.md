@@ -134,7 +134,7 @@ Enable [PulseAudio](https://www.freedesktop.org/wiki/Software/PulseAudio/) /
 [PipeWire](https://pipewire.org/) support with:
 
 ``` sh
-sudo apt instal install libpulse0
+sudo apt-get install libpulse0
 
 .venv/bin/pip3 install .[pulseaudio]
 ```
