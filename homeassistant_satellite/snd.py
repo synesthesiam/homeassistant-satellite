@@ -1,10 +1,9 @@
 import contextlib
 import logging
 import subprocess
-from time import sleep
-from typing import TYPE_CHECKING, Any, Generator
 import wave
-from typing import Final, List
+from time import sleep
+from typing import TYPE_CHECKING, Any, Dict, Final, Generator, List, Optional
 
 from .mic import APP_NAME
 from .state import State
@@ -73,8 +72,8 @@ def play_subprocess(
 @contextlib.contextmanager
 def _pulseaudio_echo_cancel(
     enabled: bool,
-    snd_device: str | None,
-    mic_device: str | None,
+    snd_device: Optional[str],
+    mic_device: Optional[str],
     pactl: "pulsectl.Pulse",
 ) -> Generator[Any, None, None]:
     """
@@ -100,16 +99,16 @@ def _pulseaudio_echo_cancel(
 
         # find the virtual sink and source created by the module (via the owner_module attribute).
         # In PipeWire owner_module is wrong (bug?) so we fallback to the one with the max index.
-        def find(list: Any, is_source: bool):
-            max = None
-            for s in list:
-                if is_source and s.monitor_of_sink not in [None, 4294967295]:
+        def find(sink_src_list: Any, is_source: bool):
+            max_sink_src = None
+            for sink_src in sink_src_list:
+                if is_source and sink_src.monitor_of_sink not in [None, 4294967295]:
                     continue  # ignore monitor sources
-                if s.owner_module == ec_module:
-                    return s
-                if max is None or max.index < s.index:
-                    max = s
-            return max  # fallback to the sink/source with max index
+                if sink_src.owner_module == ec_module:
+                    return sink_src
+                if max_sink_src is None or max_sink_src.index < sink_src.index:
+                    max_sink_src = sink_src
+            return max_sink_src  # fallback to the sink/source with max index
 
         ec_sink = find(pactl.sink_list(), False)
         ec_source = find(pactl.source_list(), True)
@@ -127,7 +126,7 @@ def _pulseaudio_echo_cancel(
         if srv_info.default_sink_name == sink.name:
             pactl.default_set(ec_sink)
         else:
-            _LOGGER.warn(
+            _LOGGER.warning(
                 "using non-default device with --echo-cancel. Ensure that all apps send audio to %s",
                 ec_sink.name,
             )
@@ -168,8 +167,8 @@ def _pulseaudio_echo_cancel(
 @contextlib.contextmanager
 def play_pulseaudio(
     server: str,
-    snd_device: str | None,
-    mic_device: str | None,
+    snd_device: Optional[str],
+    mic_device: Optional[str],
     volume: float = 1.0,
     ducking_volume: float = 0.2,
     echo_cancel: bool = False,
@@ -194,7 +193,7 @@ def play_pulseaudio(
         snd_device=snd_device,
         mic_device=mic_device,
     ) as sink:
-        ducked = {}  # stream index => volume before ducking
+        ducked: Dict[int, float] = {}  # stream index => volume before ducking
 
         def play(media: str):
             # The playback rate can be arbitrary since ffmpeg resamples to that
@@ -243,8 +242,8 @@ def play_pulseaudio(
             yield play, duck
         finally:
             # unduck on exit
-            for index, volume in ducked.items():
-                pactl.sink_input_volume_set(index=index, vol=volume)
+            for ducked_index, ducked_volume in ducked.items():
+                pactl.sink_input_volume_set(index=ducked_index, vol=ducked_volume)
 
 
 def media_to_chunks(
