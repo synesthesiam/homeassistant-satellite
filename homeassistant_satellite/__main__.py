@@ -172,7 +172,7 @@ async def main() -> None:
         sys.exit(1)
 
     if args.token_file:
-        with open(args.token_file, "r") as fd:
+        with open(args.token_file, "r", encoding="utf-8") as fd:
             token = fd.read().strip()
     else:
         token = args.token
