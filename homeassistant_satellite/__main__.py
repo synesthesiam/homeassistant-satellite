@@ -497,6 +497,6 @@ def run():
 
 if __name__ == "__main__":
     try:
-        main()
+        run()
     except KeyboardInterrupt:
         pass
