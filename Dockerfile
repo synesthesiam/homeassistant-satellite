@@ -17,7 +17,7 @@ RUN apt-get update && \
 COPY requirements_extra.txt requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY ./ ./
 
 RUN pip install --no-cache-dir .[webrtc]
 

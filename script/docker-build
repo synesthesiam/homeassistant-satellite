@@ -1,10 +1,16 @@
 #!/bin/bash
 set -e
-VERSION=$1
 
-if [ "${VERSION}" == "" ] ; then
-    echo "$0 <VERSION>"
+this_dir="$( cd "$( dirname "$0" )" && pwd )"
+repo_dir="$(realpath "${this_dir}/..")"
+version="$(cat "${repo_dir}/homeassistant_satellite/VERSION")"
+
+if [ -z "${version}" ]; then
+    echo 'Cannot find VERSION file'
     exit 1
 fi
 
-docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 --push -t ghcr.io/synesthesiam/homeassistant-satellite:latest -t "ghcr.io/synesthesiam/homeassistant-satellite:${VERSION}" .
+docker buildx build . \
+    --platform linux/amd64,linux/arm64,linux/arm/v7 \
+    -t 'ghcr.io/synesthesiam/homeassistant-satellite:latest' \
+    -t "ghcr.io/synesthesiam/homeassistant-satellite:${version}" "$@"

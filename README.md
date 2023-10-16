@@ -139,20 +139,13 @@ sudo apt-get install libpulse0
 .venv/bin/pip3 install .[pulseaudio]
 ```
 
-Use `--pulseaudio` to record and play audio via PulseAudio or PipeWire. A socket
-or hostname can be optionally provided as `--pulseaudio=<socket|host>`.
+Use `--pulseaudio` to record and play audio via PulseAudio or PipeWire. A socket or hostname can be optionally provided as `--pulseaudio=<socket|host>`.
 
-When using PulseAudio, ducking and acoustic echo cancelation are available to
-facilitate cases when the satellite is simultaneously used to play music,
-movies, etc. Such sounds are captured by the microphone, together with the
-user's voice, and interfere wake word detection and speech recognition.
+When using PulseAudio, ducking and acoustic echo cancelation are available to facilitate cases when the satellite is simultaneously used to play music, movies, etc. Such sounds are captured by the microphone, together with the user's voice, and interfere wake word detection and speech recognition.
 
-`--echo-cancel` enables PulseAudio's acoustic echo cancelation, which removes
-playback sounds from the captured audio, making wake word detection easier.
+`--echo-cancel` enables PulseAudio's acoustic echo cancelation, which removes playback sounds from the captured audio, making wake word detection easier.
 
-`--ducking=<vol>` sets the volume of all playback streams to `<vol>`
-(eg `0.2` for 20%) after the wake word is detected and until the pipeline
-finishes, making speech recognition easier.
+`--ducking=<vol>` sets the volume of all playback streams to `<vol>` (e.g., `0.2` for 20%) after the wake word is detected and until the pipeline finishes, making speech recognition easier.
 
 
 ## Running as a Service
@@ -202,19 +195,22 @@ Disable and stop the service with:
 sudo systemctl disable --now homeassistant-satellite.service
 ```
 
-### Running in docker
+### Running in Docker
 
-cmd:
+On the command-line:
 
 ```bash
-docker run --rm -ti --name "homeassistant-satellite" --device /dev/snd --group-add=audio \
+docker run --rm -it \
+    --name 'homeassistant-satellite' \
+    --device /dev/snd \
+    --group-add=audio \
     ghcr.io/synesthesiam/homeassistant-satellite:latest \
     --host <HOST> \
-    --token <TOCKEN> \
+    --token <TOKEN> \
     ...
 ```
 
-compose:
+Using Docker Compose:
 
 ```yaml
 version: "3.8"
@@ -231,6 +227,8 @@ services:
       - --token
       - <TOKEN>
 ```
+
+It may be necessary to manually specify `--mic-device plughw:...` and `--snd-device plughw:...` when using Docker.
 
 ## Troubleshooting
 

@@ -1,0 +1,8 @@
+#!/bin/bash
+set -e
+
+docker run --rm -it \
+    --name 'homeassistant-satellite' \
+    --device /dev/snd \
+    --group-add=audio \
+    'homeassistant-satellite:latest' "$@"
