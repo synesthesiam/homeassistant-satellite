@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
-from dataclasses import dataclass
 import logging
-import queue
 import os
+import queue
 import shlex
 import shutil
 import sys
@@ -12,8 +11,9 @@ import threading
 import time
 import wave
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Deque, Final, Optional, Tuple
+from typing import Deque, Final, Optional, Tuple, Union
 
 from .mic import (
     ARECORD_WITH_DEVICE,
@@ -22,17 +22,17 @@ from .mic import (
     RATE,
     SAMPLES_PER_CHUNK,
     WIDTH,
+    record_pulseaudio,
     record_subprocess,
     record_udp,
-    record_pulseaudio,
 )
 from .remote import stream
 from .snd import (
     APLAY_WITH_DEVICE,
     DEFAULT_APLAY,
-    play_udp,
-    play_subprocess,
     play_pulseaudio,
+    play_subprocess,
+    play_udp,
 )
 from .state import MicState, State
 from .util import multiply_volume
@@ -55,7 +55,7 @@ class Duck:
     enable: bool  # enable/disable ducking
 
 
-PlaybackQueueItem = PlayMedia | SetMicState | Duck | None
+PlaybackQueueItem = Optional[Union[PlayMedia, SetMicState, Duck]]
 
 VAD_DISABLED = "disabled"
 _LOGGER = logging.getLogger(__name__)
@@ -474,7 +474,7 @@ def _playback_proc(
 
     except Exception:
         _LOGGER.exception("Sound error in _playback_proc")
-        os._exit(-1)
+        os._exit(-1)  # pylint: disable=protected-access
 
 
 # -----------------------------------------------------------------------------
