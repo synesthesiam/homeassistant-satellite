@@ -69,6 +69,10 @@ For example:
 script/run ... --awake-sound sounds/awake.wav --done-sound sounds/done.wav
 ```
 
+### Pipeline Name
+
+The preferred pipeline will be run by default, but you change this with `--pipeline <NAME>` where `<NAME>` is the name of the pipeline you'd like to run instead.
+
 ### Change Microphone/Speaker
 
 Run `arecord -L` to list available input devices. Pick devices that start with `plughw:` because they will perform software audio conversions. Use `--mic-device plughw:...` to use a specific input device.
@@ -119,6 +123,37 @@ Use`--auto-gain <AG>` to automatically increase the microphone volume (0-31 with
 
 Use`--volume-multiplier <VM>` to multiply volume by `<VM>` so 2.0 would be twice as loud (default: 1.0).
 
+### HTTPS
+
+If your Home Assistant server uses https, you will need to add `--protocol https` to your command.
+
+
+### PulseAudio / PipeWire
+
+Enable [PulseAudio](https://www.freedesktop.org/wiki/Software/PulseAudio/) /
+[PipeWire](https://pipewire.org/) support with:
+
+``` sh
+sudo apt-get install libpulse0
+
+.venv/bin/pip3 install .[pulseaudio]
+```
+
+Use `--pulseaudio` to record and play audio via PulseAudio or PipeWire. A socket
+or hostname can be optionally provided as `--pulseaudio=<socket|host>`.
+
+When using PulseAudio, ducking and acoustic echo cancelation are available to
+facilitate cases when the satellite is simultaneously used to play music,
+movies, etc. Such sounds are captured by the microphone, together with the
+user's voice, and interfere wake word detection and speech recognition.
+
+`--echo-cancel` enables PulseAudio's acoustic echo cancelation, which removes
+playback sounds from the captured audio, making wake word detection easier.
+
+`--ducking=<vol>` sets the volume of all playback streams to `<vol>`
+(eg `0.2` for 20%) after the wake word is detected and until the pipeline
+finishes, making speech recognition easier.
+
 
 ## Running as a Service
 
@@ -133,6 +168,8 @@ Paste in the following template, and change both `/home/pi/homeassistant-satelli
 ``` text
 [Unit]
 Description=Home Assistant Satellite
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
@@ -165,7 +202,6 @@ Disable and stop the service with:
 sudo systemctl disable --now homeassistant-satellite.service
 ```
 
-
 ### Running in docker
 
 cmd:
@@ -193,7 +229,7 @@ services:
       - --host
       - <HOST>
       - --token
-      - <TOCKEN>
+      - <TOKEN>
 ```
 
 ## Troubleshooting
