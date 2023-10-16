@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Deque, Final, Optional, Tuple, Union
 
+from homeassistant_satellite.ha_connection import HAConnection
+
 from .mic import (
     ARECORD_WITH_DEVICE,
     CHANNELS,
@@ -228,69 +230,91 @@ async def main() -> None:
     )
     playback_thread.start()
 
-    # Send requests to the playback thread
+    # Connect to HA and continuously run pipelines
     try:
-        while state.is_running:
-            try:
-                if args.vad != VAD_DISABLED:
-                    _LOGGER.debug("Waiting for speech")
-                    await speech_detected.wait()
-                    speech_detected.clear()
+        async with HAConnection(
+            host=args.host,
+            protocol=args.protocol,
+            port=args.port,
+            token=token,
+        ) as ha_connection:
+            while state.is_running:
+                await _run_pipeline(
+                    args=args,
+                    state=state,
+                    ha_connection=ha_connection,
+                    speech_detected=speech_detected,
+                    recording_queue=recording_queue,
+                    playback_queue=playback_queue,
+                )
 
-                    if not state.is_running:
-                        # Error in mic thread
-                        break
+    except Exception:
+        _LOGGER.exception("Unknown exception in the main thread")
 
-                    _LOGGER.debug("Speech detected")
-
-                async for _timestamp, event_type, event_data in stream(
-                    host=args.host,
-                    protocol=args.protocol,
-                    port=args.port,
-                    token=token,
-                    audio=recording_queue,
-                    pipeline_name=args.pipeline,
-                    audio_seconds_to_buffer=args.wake_buffer_seconds,
-                ):
-                    _LOGGER.debug("%s %s", event_type, event_data)
-
-                    if event_type == "wake_word-end":
-                        if args.ducking_volume is not None:
-                            playback_queue.put_nowait(Duck(True))
-
-                        if args.awake_sound:
-                            state.mic = MicState.NOT_RECORDING
-                            playback_queue.put_nowait(PlayMedia(args.awake_sound))
-                            playback_queue.put_nowait(SetMicState(MicState.RECORDING))
-
-                    elif event_type == "stt-end":
-                        # Stop recording until run ends
-                        state.mic = MicState.NOT_RECORDING
-                        if args.done_sound:
-                            playback_queue.put_nowait(PlayMedia(args.done_sound))
-
-                    elif event_type == "tts-end":
-                        # Play TTS output
-                        tts_url = event_data.get("tts_output", {}).get("url")
-                        if tts_url:
-                            url = f"{args.protocol}://{args.host}:{args.port}{tts_url}"
-                            playback_queue.put_nowait(PlayMedia(url))
-
-                    elif event_type in ("run-end", "error"):
-                        # Start recording for next wake word (after TTS finishes)
-                        playback_queue.put_nowait(SetMicState(MicState.WAIT_FOR_VAD))
-
-                        if args.ducking_volume is not None:
-                            playback_queue.put_nowait(Duck(False))
-
-            except Exception:
-                _LOGGER.exception("Unexpected error")
-                state.mic = MicState.WAIT_FOR_VAD
     finally:
         state.is_running = False
         mic_thread.join()
         playback_queue.put_nowait(None)  # exit request
         playback_thread.join()
+
+
+async def _run_pipeline(
+    args,
+    state: State,
+    ha_connection: HAConnection,
+    speech_detected: asyncio.Event,
+    recording_queue: "asyncio.Queue[Tuple[int, bytes]]",
+    playback_queue: "queue.Queue[PlaybackQueueItem]",
+):
+    """Run a single pipeline in the main thread"""
+
+    if args.vad != VAD_DISABLED:
+        _LOGGER.debug("Waiting for speech")
+        await speech_detected.wait()
+        speech_detected.clear()
+
+    if not state.is_running:
+        # Error in mic thread
+        return
+
+    _LOGGER.warning("Speech detected")
+
+    async for _timestamp, event_type, event_data in stream(
+        ha_connection=ha_connection,
+        audio=recording_queue,
+        pipeline_name=args.pipeline,
+        audio_seconds_to_buffer=args.wake_buffer_seconds,
+    ):
+        _LOGGER.warning("%s %s", event_type, event_data)
+
+        if event_type == "wake_word-end":
+            if args.ducking_volume is not None:
+                playback_queue.put_nowait(Duck(True))
+
+            if args.awake_sound:
+                state.mic = MicState.NOT_RECORDING
+                playback_queue.put_nowait(PlayMedia(args.awake_sound))
+                playback_queue.put_nowait(SetMicState(MicState.RECORDING))
+
+        elif event_type == "stt-end":
+            # Stop recording until run ends
+            state.mic = MicState.NOT_RECORDING
+            if args.done_sound:
+                playback_queue.put_nowait(PlayMedia(args.done_sound))
+
+        elif event_type == "tts-end":
+            # Play TTS output
+            tts_url = event_data.get("tts_output", {}).get("url")
+            if tts_url:
+                url = f"{args.protocol}://{args.host}:{args.port}{tts_url}"
+                playback_queue.put_nowait(PlayMedia(url))
+
+        elif event_type in ("run-end", "error"):
+            # Start recording for next wake word (after TTS finishes)
+            playback_queue.put_nowait(SetMicState(MicState.WAIT_FOR_VAD))
+
+            if args.ducking_volume is not None:
+                playback_queue.put_nowait(Duck(False))
 
 
 # -----------------------------------------------------------------------------
@@ -492,7 +516,6 @@ def _playback_proc(
 
 def run():
     asyncio.run(main())
-
 
 
 if __name__ == "__main__":
