@@ -128,6 +128,33 @@ Use`--volume-multiplier <VM>` to multiply volume by `<VM>` so 2.0 would be twice
 If your Home Assistant server uses https, you will need to add `--protocol https` to your command.
 
 
+### PulseAudio / PipeWire
+
+Enable [PulseAudio](https://www.freedesktop.org/wiki/Software/PulseAudio/) /
+[PipeWire](https://pipewire.org/) support with:
+
+``` sh
+sudo apt-get install libpulse0
+
+.venv/bin/pip3 install .[pulseaudio]
+```
+
+Use `--pulseaudio` to record and play audio via PulseAudio or PipeWire. A socket
+or hostname can be optionally provided as `--pulseaudio=<socket|host>`.
+
+When using PulseAudio, ducking and acoustic echo cancelation are available to
+facilitate cases when the satellite is simultaneously used to play music,
+movies, etc. Such sounds are captured by the microphone, together with the
+user's voice, and interfere wake word detection and speech recognition.
+
+`--echo-cancel` enables PulseAudio's acoustic echo cancelation, which removes
+playback sounds from the captured audio, making wake word detection easier.
+
+`--ducking=<vol>` sets the volume of all playback streams to `<vol>`
+(eg `0.2` for 20%) after the wake word is detected and until the pipeline
+finishes, making speech recognition easier.
+
+
 ## Running as a Service
 
 You can run homeassistant-satellite as a systemd service by first creating a service file:
@@ -174,6 +201,7 @@ Disable and stop the service with:
 ``` sh
 sudo systemctl disable --now homeassistant-satellite.service
 ```
+
 
 ## Troubleshooting
 

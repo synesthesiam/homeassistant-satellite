@@ -1,13 +1,14 @@
 import logging
-import socket
 import subprocess
 import time
-from typing import Final, Iterable, List, Tuple
+from typing import Final, Iterable, List, Optional, Tuple
 
 from .state import State
 
 DEFAULT_ARECORD: Final = "arecord -r 16000 -c 1 -f S16_LE -t raw"
 ARECORD_WITH_DEVICE: Final = "arecord -D {device} -r 16000 -c 1 -f S16_LE -t raw"
+
+APP_NAME: Final = "homeassistant_satellite"
 
 RATE: Final = 16000
 WIDTH: Final = 2
@@ -24,6 +25,8 @@ def record_udp(
     samples_per_chunk: int = SAMPLES_PER_CHUNK,
 ) -> Iterable[Tuple[int, bytes]]:
     bytes_per_chunk = samples_per_chunk * WIDTH * CHANNELS
+
+    import socket  # only if needed
 
     udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -69,4 +72,30 @@ def record_subprocess(
             if not chunk:
                 break
 
+            yield time.monotonic_ns(), chunk
+
+
+def record_pulseaudio(
+    server: str,
+    device: Optional[str],
+    samples_per_chunk: int = SAMPLES_PER_CHUNK,
+) -> Iterable[Tuple[int, bytes]]:
+    """Yield mic samples with a timestamp."""
+
+    import pasimple  # only if needed
+
+    server_name = server if server != "__default__" else None
+
+    with pasimple.PaSimple(
+        direction=pasimple.PA_STREAM_RECORD,
+        server_name=server_name,
+        device_name=device,
+        app_name=APP_NAME,
+        format=pasimple.PA_SAMPLE_S16LE,
+        channels=CHANNELS,
+        rate=RATE,
+        fragsize=samples_per_chunk * WIDTH,
+    ) as pa:
+        while True:
+            chunk = pa.read(samples_per_chunk * WIDTH)
             yield time.monotonic_ns(), chunk

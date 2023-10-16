@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
-import functools
+from dataclasses import dataclass
 import logging
+import queue
 import os
 import shlex
 import shutil
-import socket
 import sys
 import threading
 import time
@@ -24,12 +24,38 @@ from .mic import (
     WIDTH,
     record_subprocess,
     record_udp,
+    record_pulseaudio,
 )
 from .remote import stream
-from .snd import APLAY_WITH_DEVICE, DEFAULT_APLAY, play_subprocess, play_udp
+from .snd import (
+    APLAY_WITH_DEVICE,
+    DEFAULT_APLAY,
+    play_udp,
+    play_subprocess,
+    play_pulseaudio,
+)
 from .state import MicState, State
 from .util import multiply_volume
 from .vad import SileroVoiceActivityDetector, VoiceActivityDetector
+
+
+# items of the playback queue
+@dataclass
+class PlayMedia:
+    media: str  # wav url/path to play
+
+
+@dataclass
+class SetMicState:
+    mic_state: MicState  # mic state after playing
+
+
+@dataclass
+class Duck:
+    enable: bool  # enable/disable ducking
+
+
+PlaybackQueueItem = PlayMedia | SetMicState | Duck | None
 
 VAD_DISABLED = "disabled"
 _LOGGER = logging.getLogger(__name__)
@@ -100,6 +126,23 @@ async def main() -> None:
     parser.add_argument("--auto-gain", type=int, default=0, choices=list(range(32)))
     parser.add_argument("--volume-multiplier", type=float, default=1.0)
     #
+    parser.add_argument(
+        "--pulseaudio",
+        nargs="?",
+        const="__default__",  # when used without argument
+        help="Use pulseaudio (socket/hostname optionally passed as argument)",
+    )
+    parser.add_argument(
+        "--ducking-volume",
+        type=float,
+        help="Set output volume to this value while recording",
+    )
+    parser.add_argument(
+        "--echo-cancel",
+        action="store_true",
+        help="Enable acoustic echo cancellation",
+    )
+    #
     parser.add_argument("--udp-mic", type=int, help="UDP port to receive input audio")
     parser.add_argument("--udp-snd", type=int, help="UDP port to send output audio")
     parser.add_argument(
@@ -141,51 +184,44 @@ async def main() -> None:
     args.mic_command = shlex.split(args.mic_command)
     args.snd_command = shlex.split(args.snd_command)
 
+    if args.ducking_volume and not args.pulseaudio:
+        _LOGGER.fatal("--ducking-volume only available with --pulseaudio")
+        sys.exit(1)
+    if args.echo_cancel and not args.pulseaudio:
+        _LOGGER.fatal("--echo-cancel only available with --pulseaudio")
+        sys.exit(1)
+
     if args.debug_recording_dir:
         # Create directory for saving debug audio
         args.debug_recording_dir = Path(args.debug_recording_dir)
         args.debug_recording_dir.mkdir(parents=True, exist_ok=True)
 
     loop = asyncio.get_running_loop()
-    audio_queue: "asyncio.Queue[Tuple[int, bytes]]" = asyncio.Queue()
+    recording_queue: "asyncio.Queue[Tuple[int, bytes]]" = asyncio.Queue()
+    playback_queue: "queue.Queue[PlaybackQueueItem]" = queue.Queue()
     speech_detected = asyncio.Event()
     state = State(mic=MicState.WAIT_FOR_VAD)
 
     # Recording thread for microphone
     mic_thread = threading.Thread(
         target=_mic_proc,
-        args=(args, loop, audio_queue, speech_detected, state),
+        args=(args, loop, recording_queue, speech_detected, state),
         daemon=True,
     )
     mic_thread.start()
 
-    # Audio output
-    snd_socket: Optional[socket.socket] = None
+    # Playback thread
+    playback_thread = threading.Thread(
+        target=_playback_proc,
+        args=(args, playback_queue, state),
+        daemon=True,
+    )
+    playback_thread.start()
 
+    # Send requests to the playback thread
     try:
         while state.is_running:
             try:
-                if args.udp_snd is not None:
-                    # UDP socket
-                    if snd_socket is None:
-                        snd_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    play = functools.partial(
-                        play_udp,
-                        udp_socket=snd_socket,
-                        udp_port=args.udp_snd,
-                        state=state,
-                        sample_rate=args.udp_snd_sample_rate,
-                        volume=args.volume,
-                    )
-                else:
-                    # External program
-                    play = functools.partial(
-                        play_subprocess,
-                        command=args.snd_command,
-                        sample_rate=args.snd_command_sample_rate,
-                        volume=args.volume,
-                    )
-
                 if args.vad != VAD_DISABLED:
                     _LOGGER.debug("Waiting for speech")
                     await speech_detected.wait()
@@ -202,38 +238,49 @@ async def main() -> None:
                     protocol=args.protocol,
                     port=args.port,
                     token=args.token,
-                    audio=audio_queue,
+                    audio=recording_queue,
                     pipeline_name=args.pipeline,
                     audio_seconds_to_buffer=args.wake_buffer_seconds,
                 ):
                     _LOGGER.debug("%s %s", event_type, event_data)
 
                     if event_type == "wake_word-end":
+                        if args.ducking_volume is not None:
+                            playback_queue.put_nowait(Duck(True))
+
                         if args.awake_sound:
                             state.mic = MicState.NOT_RECORDING
-                            play(media=args.awake_sound)
-                            state.mic = MicState.RECORDING
+                            playback_queue.put_nowait(PlayMedia(args.awake_sound))
+                            playback_queue.put_nowait(SetMicState(MicState.RECORDING))
+
                     elif event_type == "stt-end":
                         # Stop recording until run ends
                         state.mic = MicState.NOT_RECORDING
                         if args.done_sound:
-                            play(media=args.done_sound)
+                            playback_queue.put_nowait(PlayMedia(args.done_sound))
+
                     elif event_type == "tts-end":
                         # Play TTS output
                         tts_url = event_data.get("tts_output", {}).get("url")
                         if tts_url:
-                            play(
-                                media=f"{args.protocol}://{args.host}:{args.port}{tts_url}"
-                            )
+                            url = f"{args.protocol}://{args.host}:{args.port}{tts_url}"
+                            playback_queue.put_nowait(PlayMedia(url))
+
                     elif event_type in ("run-end", "error"):
-                        # Start recording for next wake word
-                        state.mic = MicState.WAIT_FOR_VAD
+                        # Start recording for next wake word (after TTS finishes)
+                        playback_queue.put_nowait(SetMicState(MicState.WAIT_FOR_VAD))
+
+                        if args.ducking_volume is not None:
+                            playback_queue.put_nowait(Duck(False))
+
             except Exception:
                 _LOGGER.exception("Unexpected error")
                 state.mic = MicState.WAIT_FOR_VAD
     finally:
         state.is_running = False
         mic_thread.join()
+        playback_queue.put_nowait(None)  # exit request
+        playback_thread.join()
 
 
 # -----------------------------------------------------------------------------
@@ -279,6 +326,9 @@ def _mic_proc(
         if args.udp_mic is not None:
             # UDP socket
             mic_stream = record_udp(args.udp_mic, state)
+        elif args.pulseaudio is not None:
+            # PulseAudio
+            mic_stream = record_pulseaudio(args.pulseaudio, args.mic_device)
         else:
             # External program
             mic_stream = record_subprocess(args.mic_command)
@@ -372,6 +422,59 @@ def _mic_proc(
     except Exception:
         _LOGGER.exception("Unexpected error in _mic_proc")
         os._exit(-1)  # pylint: disable=protected-access
+
+
+# ----------------------------
+
+
+def _playback_proc(
+    args: argparse.Namespace,
+    playback_queue: "queue.Queue[PlaybackQueueItem]",
+    state: State,
+) -> None:
+    try:
+        if args.udp_snd is not None:
+            # UDP socket
+            play_ctx = play_udp(
+                udp_port=args.udp_snd,
+                state=state,
+                sample_rate=args.udp_snd_sample_rate,
+                volume=args.volume,
+            )
+        elif args.pulseaudio is not None:
+            # PulseAudio
+            play_ctx = play_pulseaudio(
+                server=args.pulseaudio,
+                snd_device=args.snd_device,
+                mic_device=args.mic_device,
+                volume=args.volume,
+                ducking_volume=args.ducking_volume,
+                echo_cancel=args.echo_cancel,
+            )
+        else:
+            # External program
+            play_ctx = play_subprocess(
+                command=args.snd_command,
+                sample_rate=args.snd_command_sample_rate,
+                volume=args.volume,
+            )
+
+        with play_ctx as (play, duck):
+            for item in iter(playback_queue.get, None):
+                if isinstance(item, PlayMedia):
+                    play(item.media)
+
+                elif isinstance(item, SetMicState):
+                    state.mic = item.mic_state
+
+                elif isinstance(item, Duck):
+                    duck(item.enable)
+
+            return  # we got None from the queue, exit
+
+    except Exception:
+        _LOGGER.exception("Sound error in _playback_proc")
+        os._exit(-1)
 
 
 # -----------------------------------------------------------------------------
