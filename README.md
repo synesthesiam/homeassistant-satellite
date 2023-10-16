@@ -202,6 +202,35 @@ Disable and stop the service with:
 sudo systemctl disable --now homeassistant-satellite.service
 ```
 
+### Running in docker
+
+cmd:
+
+```bash
+docker run --rm -ti --name "homeassistant-satellite" --device /dev/snd --group-add=audio \
+    ghcr.io/synesthesiam/homeassistant-satellite:latest \
+    --host <HOST> \
+    --token <TOCKEN> \
+    ...
+```
+
+compose:
+
+```yaml
+version: "3.8"
+services:
+  homeassistant-satellite:
+    image: "ghcr.io/synesthesiam/homeassistant-satellite:latest"
+    devices:
+      - /dev/snd:/dev/snd
+    group_add:
+      - audio
+    command:
+      - --host
+      - <HOST>
+      - --token
+      - <TOKEN>
+```
 
 ## Troubleshooting
 

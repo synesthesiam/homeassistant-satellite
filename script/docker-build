@@ -1,0 +1,10 @@
+#!/bin/bash
+set -e
+VERSION=$1
+
+if [ "${VERSION}" == "" ] ; then
+    echo "$0 <VERSION>"
+    exit 1
+fi
+
+docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 --push -t ghcr.io/synesthesiam/homeassistant-satellite:latest -t "ghcr.io/synesthesiam/homeassistant-satellite:${VERSION}" .
