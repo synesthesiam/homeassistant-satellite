@@ -14,3 +14,4 @@ class State:
     is_running: bool = True
     mic: MicState = MicState.NOT_RECORDING
     mic_host: Optional[str] = None
+    last_event: Optional[str] = None

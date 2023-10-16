@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import wave
+import socket
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -315,6 +316,30 @@ async def _run_pipeline(
 
             if args.ducking_volume is not None:
                 playback_queue.put_nowait(Duck(False))
+
+        # For the main events that change the state of the satellite, fire a HA
+        # event to let the world know about our state. Skip consecutive same
+        # events (mainly consecutive run-ends).
+        if (
+            event_type in ["wake_word-end", "stt-end", "tts-end", "run-end"]
+            and event_type != state.last_event
+        ):
+            state.last_event = event_type
+            asyncio.create_task(  # in background
+                ha_connection.send_and_receive(
+                    {
+                        "type": "fire_event",
+                        "event_type": "homeassistant_satellite_event",
+                        "event_data": {
+                            "satellite_name": socket.gethostname(),
+                            "pipeline_event": {
+                                "type": event_type,
+                                "data": event_data,
+                            },
+                        },
+                    }
+                )
+            )
 
 
 # -----------------------------------------------------------------------------
