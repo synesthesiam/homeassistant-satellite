@@ -479,8 +479,14 @@ def _playback_proc(
 
 # -----------------------------------------------------------------------------
 
+
+def run():
+    asyncio.run(main())
+
+
+
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        main()
     except KeyboardInterrupt:
         pass

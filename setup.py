@@ -59,4 +59,9 @@ setup(
         "Programming Language :: Python :: 3.11",
     ],
     keywords="voice satellite home assistant",
+    entry_points={
+        'console_scripts': [
+            'homeassistant-satellite = homeassistant_satellite:__main__.run'
+        ]
+    },
 )
