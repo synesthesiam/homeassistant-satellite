@@ -461,15 +461,14 @@ def _playback_proc(
 
         with play_ctx as (play, duck):
             for item in iter(playback_queue.get, None):
-                match item:
-                    case PlayMedia(media):
-                        play(media=media)
+                if isinstance(item, PlayMedia):
+                    play(item.media)
 
-                    case SetMicState(mic_state):
-                        state.mic = mic_state
+                elif isinstance(item, SetMicState):
+                    state.mic = item.mic_state
 
-                    case Duck(enable):
-                        duck(enable)
+                elif isinstance(item, Duck):
+                    duck(item.enable)
 
             return  # we got None from the queue, exit
 
