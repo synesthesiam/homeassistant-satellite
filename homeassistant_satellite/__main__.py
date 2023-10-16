@@ -65,7 +65,11 @@ _DIR = Path(__file__).parent
 async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", required=True, help="Home Assistant server host")
-    parser.add_argument("--token", required=True, help="Long-lived access token")
+    token_group = parser.add_mutually_exclusive_group(required=True)
+    token_group.add_argument("--token", help="Long-lived access token")
+    token_group.add_argument(
+        "--token-file", help="Path to a file containing the Long-lived access token"
+    )
     parser.add_argument(
         "--port", type=int, help="Port for Home Assistant server", default=8123
     )
@@ -167,6 +171,12 @@ async def main() -> None:
         _LOGGER.fatal("Please install ffmpeg")
         sys.exit(1)
 
+    if args.token_file:
+        with open(args.token_file, "r") as fd:
+            token = fd.read().strip()
+    else:
+        token = args.token
+
     if args.mic_device and (not args.mic_command):
         args.mic_command = ARECORD_WITH_DEVICE.format(device=args.mic_device)
 
@@ -237,7 +247,7 @@ async def main() -> None:
                     host=args.host,
                     protocol=args.protocol,
                     port=args.port,
-                    token=args.token,
+                    token=token,
                     audio=recording_queue,
                     pipeline_name=args.pipeline,
                     audio_seconds_to_buffer=args.wake_buffer_seconds,
