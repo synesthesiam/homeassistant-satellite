@@ -17,13 +17,15 @@ SAMPLES_PER_CHUNK = int(0.03 * RATE)  # 30ms
 
 _LOGGER = logging.getLogger()
 
+MicStream = Iterable[Tuple[int, bytes]]
+
 
 def record_udp(
     port: int,
     state: State,
     host: str = "0.0.0.0",
     samples_per_chunk: int = SAMPLES_PER_CHUNK,
-) -> Iterable[Tuple[int, bytes]]:
+) -> MicStream:
     bytes_per_chunk = samples_per_chunk * WIDTH * CHANNELS
 
     import socket  # only if needed
@@ -61,7 +63,7 @@ def record_udp(
 def record_subprocess(
     command: List[str],
     samples_per_chunk: int = SAMPLES_PER_CHUNK,
-) -> Iterable[Tuple[int, bytes]]:
+) -> MicStream:
     """Yield mic samples from a subprocess with a timestamp."""
     _LOGGER.debug("Microphone command: %s", command)
     bytes_per_chunk = samples_per_chunk * WIDTH * CHANNELS
@@ -79,7 +81,7 @@ def record_pulseaudio(
     server: str,
     device: Optional[str],
     samples_per_chunk: int = SAMPLES_PER_CHUNK,
-) -> Iterable[Tuple[int, bytes]]:
+) -> MicStream:
     """Yield mic samples with a timestamp."""
 
     import pasimple  # only if needed
