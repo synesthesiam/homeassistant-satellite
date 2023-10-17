@@ -314,11 +314,8 @@ def _mic_proc(
         sub_chunk_bytes: Final = sub_chunk_samples * 2  # 16-bit
         wav_writer: Optional[wave.Wave_write] = None
 
-        if (
-            (args.vad == "webrtcvad")
-            or (args.noise_suppression > 0)
-            or (args.auto_gain > 0)
-        ):
+        webrtc_vad = args.vad == "webrtcvad"
+        if webrtc_vad or (args.noise_suppression > 0) or (args.auto_gain > 0):
             from webrtc_noise_gain import AudioProcessor
 
             audio_processor = AudioProcessor(args.auto_gain, args.noise_suppression)
@@ -367,7 +364,7 @@ def _mic_proc(
                     )
 
                     clean_chunk += result.audio
-                    if result.is_speech:
+                    if webrtc_vad and result.is_speech:
                         vad_prob = 1.0
 
                 # Overwrite with clean audio
@@ -379,7 +376,7 @@ def _mic_proc(
                     wav_writer.close()
                     wav_writer = None
 
-                if (vad is None) and (audio_processor is None):
+                if not (vad or webrtc_vad):
                     # No VAD
                     state.mic = MicState.RECORDING
                 else:
