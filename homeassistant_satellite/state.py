@@ -6,6 +6,7 @@ from typing import Optional
 class MicState(int, Enum):
     NOT_RECORDING = auto()
     WAIT_FOR_VAD = auto()
+    WAIT_FOR_WAKE_WORD = auto()
     RECORDING = auto()
 
     def next(self):

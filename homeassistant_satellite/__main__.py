@@ -21,6 +21,7 @@ from .mic_record import (
 )
 from .mic_process import (
     VAD_DISABLED,
+    WAKE_WORD_DISABLED,
     mic_thread_entry,
 )
 from .remote import stream
@@ -123,6 +124,15 @@ async def main() -> None:
     )
     parser.add_argument("--auto-gain", type=int, default=0, choices=list(range(32)))
     parser.add_argument("--volume-multiplier", type=float, default=1.0)
+    #
+    parser.add_argument(
+        "--wake-word",
+        choices=(WAKE_WORD_DISABLED, "wyoming"),
+        default=WAKE_WORD_DISABLED,
+    )
+    parser.add_argument("--wake-word-id", type=str)
+    parser.add_argument("--wyoming-host", type=str, default="localhost")
+    parser.add_argument("--wyoming-port", type=int, default=10400)
     #
     parser.add_argument(
         "--pulseaudio",
@@ -287,6 +297,7 @@ async def _run_pipeline(
         audio=recording_queue,
         pipeline_name=args.pipeline,
         audio_seconds_to_buffer=args.wake_buffer_seconds,
+        start_stage=("wake_word" if args.wake_word == WAKE_WORD_DISABLED else "stt"),
     ):
         _LOGGER.warning("%s %s", event_type, event_data)
 

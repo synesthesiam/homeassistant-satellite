@@ -13,6 +13,7 @@ async def stream(
     audio: "asyncio.Queue[Tuple[int, bytes]]",
     pipeline_name: Optional[str] = None,
     audio_seconds_to_buffer: float = 0,
+    start_stage: str = "wake_word",
 ) -> AsyncGenerator[Tuple[int, str, Dict[str, Any]], None]:
     """Streams audio to an Assist pipeline and yields events as (timestamp, type, data)."""
 
@@ -24,7 +25,13 @@ async def stream(
         ha_connection,
         pipeline_id,
         audio_seconds_to_buffer=audio_seconds_to_buffer,
+        start_stage=start_stage,
     )
+
+    # If wake_word has already been performed, emit wake_word_end immediately
+    # since it will never arrive from HA.
+    if start_stage == "stt":
+        yield time.monotonic_ns(), "wake_word-end", {}
 
     async for timestamp, event_type, event_data in _audio_to_events(
         ha_connection,
@@ -61,11 +68,12 @@ async def _start_pipeline(
     ha_connection,
     pipeline_id: Optional[str],
     audio_seconds_to_buffer: float = 0.0,
+    start_stage: str = "wake_word",
 ) -> Tuple[AsyncGenerator[dict, None], int]:
     """Starts Assist pipeline and returns (message id, handler id)"""
     pipeline_args = {
         "type": "assist_pipeline/run",
-        "start_stage": "wake_word",
+        "start_stage": start_stage,
         "end_stage": "tts",
         "input": {
             "sample_rate": 16000,

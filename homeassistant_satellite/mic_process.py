@@ -26,8 +26,10 @@ from .mic_record import (
 from .state import MicState, State
 from .util import multiply_volume
 from .vad import SileroVoiceActivityDetector
+from .wake_word import WyomingWakeWordDetector
 
 VAD_DISABLED = "disabled"
+WAKE_WORD_DISABLED = "disabled"
 
 _LOGGER = logging.getLogger()
 
@@ -139,7 +141,6 @@ def _vad_pipe(
     vad_threshold: float,
     vad_trigger_level: int,
     vad_buffer_chunks: int,
-    event: asyncio.Event,
     state: State,
 ) -> MicStream:
     """
@@ -176,8 +177,7 @@ def _vad_pipe(
             # buffered chunks downstream before continuing with new ones
             _LOGGER.warning("Speech detected")
 
-            state.mic = MicState.RECORDING
-            event.set()
+            state.mic = MicState.WAIT_FOR_WAKE_WORD
 
             for buffered_chunk in vad_chunk_buffer:
                 yield buffered_chunk
@@ -204,6 +204,38 @@ def _skip_mic_state_pipe(
                 event.set()
 
         yield ts_chunk
+
+
+def _wyoming_wake_word_pipe(
+    input: MicStream,
+    state: State,
+    wyoming_host: str,
+    wyoming_port: int,
+    wake_word_id: str | None,
+    event: asyncio.Event,
+    loop: asyncio.AbstractEventLoop,
+):
+    with WyomingWakeWordDetector(
+        host=wyoming_host,
+        port=wyoming_port,
+        wake_word_id=wake_word_id,
+        loop=loop,
+    ) as wake:
+        for ts_chunk in input:
+            # Detections arrive asyncronously, check whether the wake word is
+            # already detected before processing the current chunks.
+            if state.mic == MicState.WAIT_FOR_WAKE_WORD and wake.detected:
+                _LOGGER.warning("Wake word detected")
+
+                wake.reset()
+                state.mic = MicState.RECORDING
+                event.set()
+
+            if state.mic == MicState.WAIT_FOR_WAKE_WORD:
+                wake.process_chunk(ts_chunk)
+            else:
+                yield ts_chunk
+
 
 def _wav_writer_pipe(
     input: MicStream,
@@ -292,7 +324,6 @@ def mic_thread_entry(
                 vad_threshold=args.vad_threshold,
                 vad_trigger_level=args.vad_trigger_level,
                 vad_buffer_chunks=args.vad_buffer_chunks,
-                event=ready_to_stream,
             )
         else:
             # No vad, skip it
@@ -302,6 +333,24 @@ def mic_thread_entry(
                 skip=MicState.WAIT_FOR_VAD,
             )
 
+        if args.wake_word == "wyoming":
+            mic_stream = _wyoming_wake_word_pipe(
+                input=mic_stream,
+                state=state,
+                wyoming_host=args.wyoming_host,
+                wyoming_port=args.wyoming_port,
+                wake_word_id=args.wake_word_id,
+                loop=loop,
+                event=ready_to_stream,
+            )
+        else:
+            # No wake word detection, skip it
+            mic_stream = _skip_mic_state_pipe(
+                input=mic_stream,
+                state=state,
+                skip=MicState.WAIT_FOR_WAKE_WORD,
+                event=ready_to_stream,
+            )
 
         if args.debug_recording_dir:
             mic_stream = _wav_writer_pipe(
