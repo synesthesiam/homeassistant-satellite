@@ -23,6 +23,7 @@ from .mic import (
     SAMPLES_PER_CHUNK,
     WIDTH,
     record_pulseaudio,
+    record_pyaudio,
     record_subprocess,
     record_udp,
 )
@@ -31,6 +32,7 @@ from .snd import (
     APLAY_WITH_DEVICE,
     DEFAULT_APLAY,
     play_pulseaudio,
+    play_pyaudio,
     play_subprocess,
     play_udp,
 )
@@ -99,6 +101,12 @@ async def main() -> None:
         default=22050,
         help="Sample rate for --snd-command (default: 22050)",
     )
+    parser.add_argument(
+        "--pyaudio-sample-rate",
+        type=int,
+        default=22050,
+        help="Sample rate for --pyaudio (default: 22050)",
+    )
     #
     parser.add_argument(
         "--awake-sound", help="Audio file to play when wake word is detected"
@@ -130,6 +138,11 @@ async def main() -> None:
     parser.add_argument("--auto-gain", type=int, default=0, choices=list(range(32)))
     parser.add_argument("--volume-multiplier", type=float, default=1.0)
     #
+    parser.add_argument(
+        "--pyaudio",
+        action="store_true",
+        help="Use PyAudio",
+    )
     parser.add_argument(
         "--pulseaudio",
         nargs="?",
@@ -333,7 +346,11 @@ def _mic_proc(
             vad = SileroVoiceActivityDetector(args.vad_model)
             _LOGGER.debug("Using silero VAD")
 
-        if args.udp_mic is not None:
+        if args.pyaudio is not None:  # new code
+            # PyAudio
+            mic_stream = record_pyaudio()  # TODO: Add appropriate arguments if needed
+            _LOGGER.debug("Using macOS audio through PyAudio, ignoring other settings.")
+        elif args.udp_mic is not None:
             # UDP socket
             mic_stream = record_udp(args.udp_mic, state)
         elif args.pulseaudio is not None:
@@ -443,7 +460,12 @@ def _playback_proc(
     state: State,
 ) -> None:
     try:
-        if args.udp_snd is not None:
+        if args.pyaudio:  # New condition to check if PyAudio should be used
+            play_ctx = play_pyaudio(
+                sample_rate=args.pyaudio_sample_rate,  # Use the sample rate from argparse
+                volume=args.volume  # Use the volume from argparse
+            )
+        elif args.udp_snd is not None:
             # UDP socket
             play_ctx = play_udp(
                 udp_port=args.udp_snd,

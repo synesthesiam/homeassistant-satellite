@@ -99,3 +99,44 @@ def record_pulseaudio(
         while True:
             chunk = pa.read(samples_per_chunk * WIDTH)
             yield time.monotonic_ns(), chunk
+
+
+def record_pyaudio(
+    samples_per_chunk: int = SAMPLES_PER_CHUNK,
+) -> Iterable[Tuple[int, bytes]]:
+    """Yield mic samples with a timestamp."""
+
+    import pyaudio  # only if needed
+
+    try:
+        p = pyaudio.PyAudio()
+    except Exception as e:
+        _LOGGER.error("Failed to initialize PyAudio: %s", e)
+        return
+
+    bytes_per_chunk = samples_per_chunk * WIDTH * CHANNELS
+
+    try:
+        stream = p.open(
+            format=pyaudio.paInt16,
+            channels=CHANNELS,
+            rate=RATE,
+            input=True,
+            frames_per_buffer=samples_per_chunk,
+        )
+    except IOError as e:
+        _LOGGER.error("Failed to open audio stream: %s", e)
+        p.terminate()
+        return
+
+    _LOGGER.debug("Microphone activated on PyAudio")
+
+    try:
+        while True:
+            chunk = stream.read(samples_per_chunk)
+            yield time.monotonic_ns(), chunk
+    finally:
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
+
