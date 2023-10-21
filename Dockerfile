@@ -5,6 +5,7 @@ LABEL org.opencontainers.image.title homeassistant-satellite
 LABEL org.opencontainers.image.description Streaming audio satellite for Home Assistant
 LABEL org.opencontainers.image.licenses MIT
 LABEL org.opencontainers.image.source https://github.com/synesthesiam/homeassistant-satellite
+LABEL org.opencontainers.image.url https://github.com/synesthesiam/homeassistant-satellite
 
 WORKDIR /usr/src/app
 

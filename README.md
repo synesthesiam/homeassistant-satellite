@@ -215,6 +215,7 @@ sudo systemctl disable --now homeassistant-satellite.service
 
 ### Running in Docker
 
+#### ALSA
 On the command-line:
 
 ```bash
@@ -222,6 +223,8 @@ docker run --rm -it \
     --name 'homeassistant-satellite' \
     --device /dev/snd \
     --group-add=audio \
+    --log-opt max-size=10m \
+    --log-opt max-file=3 \
     ghcr.io/synesthesiam/homeassistant-satellite:latest \
     --host <HOST> \
     --token <TOKEN> \
@@ -234,6 +237,11 @@ Using Docker Compose:
 version: "3.8"
 services:
   homeassistant-satellite:
+    logging:
+        driver: "json-file"
+        options:
+            max-file: 3
+            max-size: 10m
     image: "ghcr.io/synesthesiam/homeassistant-satellite:latest"
     devices:
       - /dev/snd:/dev/snd
@@ -247,6 +255,70 @@ services:
 ```
 
 It may be necessary to manually specify `--mic-device plughw:...` and `--snd-device plughw:...` when using Docker.
+
+#### PulseAudio
+
+make sure to allow TCP connection to you PulseAudio
+
+e.g. for pipewire-pulse.conf
+```
+  server.address = [
+      "unix:native"
+      { address = "tcp:127.0.0.1:4713"
+        max-clients = 64
+        listen-backlog = 32
+        client.access = "allowed"
+      }
+  ]
+```
+Note this example is not secure and any local client can connect to this PulseAudio Server.
+more details can be found her:
+https://docs.pipewire.org/page_module_protocol_pulse.html#pulse.properties
+
+Testing can be done via e.g:
+```bash
+PULSE_SERVER=127.0.0.1:4713 pactl info
+```
+
+Using command-line:
+
+```bash
+docker run --rm -it \
+    --name 'homeassistant-satellite' \
+    --group-add=audio \
+    --log-opt max-size=10m \
+    --log-opt max-file=3 \
+    --network host \
+    ghcr.io/synesthesiam/homeassistant-satellite:latest \
+    --pulseaudio 127.0.0.1:4713 \
+    --host <HOST> \
+    --token <TOKEN> \
+    ...
+```
+
+Using Docker Compose:
+
+```yaml
+version: "3.8"
+services:
+  homeassistant-satellite:
+    logging:
+        driver: "json-file"
+        options:
+            max-file: 3
+            max-size: 10m
+    image: "ghcr.io/synesthesiam/homeassistant-satellite:latest"
+    network_mode: "host"
+    group_add:
+      - audio
+    command:
+      - --pulseaudio
+      - 127.0.0.1:4713
+      - --host
+      - <HOST>
+      - --token
+      - <TOKEN>
+```
 
 ## Troubleshooting
 

@@ -3,7 +3,7 @@ Description=Home Assistant Satellite Docker
 
 [Service]
 Type=simple
-ExecStart=docker run --rm --name "homeassistant-satellite" -ti --device /dev/snd --group-add=audio ghcr.io/synesthesiam/homeassistant-satellite:latest --host <host> --token <token>
+ExecStart=docker run --rm --name "homeassistant-satellite" -ti --device /dev/snd --group-add=audio --log-opt max-size=10m --log-opt max-file=3 ghcr.io/synesthesiam/homeassistant-satellite:latest --host <host> --token <token>
 Restart=always
 RestartSec=1
 
