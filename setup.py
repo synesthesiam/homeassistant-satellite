@@ -46,6 +46,7 @@ setup(
         "silerovad": ["onnxruntime>=1.10.0,<2", "numpy<1.26"],
         "webrtc": ["webrtc-noise-gain==1.2.3"],
         "pulseaudio": ["pasimple>=0.0.2", "pulsectl>=23.5.2"],
+        "miniaudio": ["pyminiaudio>=1.59"],
     },
     classifiers=[
         "Development Status :: 3 - Alpha",

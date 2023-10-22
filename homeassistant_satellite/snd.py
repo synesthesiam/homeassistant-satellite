@@ -23,6 +23,37 @@ def duck_fail(enable: bool):
 
 
 @contextlib.contextmanager
+def play_miniaudio(
+    sample_rate: int,
+    volume: float = 1.0,
+):
+    """Uses pyminiaudio to play a URL to an audio output device."""
+    try:
+        import miniaudio
+    except ImportError:
+        _LOGGER.fatal("Please pip install homeassistant_satellite[miniaudio]")
+        raise
+    
+    device = miniaudio.PlaybackDevice(
+        sample_rate=sample_rate,
+        output_format=miniaudio.SampleFormat.SIGNED16,
+        nchannels=1
+    )
+    
+    def play(media: str):
+        with contextlib.closing(
+            media_to_chunks(media=media, sample_rate=sample_rate, volume=volume)
+        ) as chunks:
+            for chunk in chunks:
+                device.write(chunk)
+
+    try:
+        yield play, duck_fail
+    finally:
+        device.close()
+
+
+@contextlib.contextmanager
 def play_udp(
     udp_port: int,
     state: State,

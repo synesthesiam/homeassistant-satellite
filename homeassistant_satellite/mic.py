@@ -18,6 +18,26 @@ SAMPLES_PER_CHUNK = int(0.03 * RATE)  # 30ms
 _LOGGER = logging.getLogger()
 
 
+def record_miniaudio(
+    sample_rate=RATE,
+) -> Iterable[Tuple[int, bytes]]:
+    """Yield mic samples with a timestamp."""
+
+    import miniaudio  # Only imported when needed
+
+    chunks = []
+    
+    def record_miniaudio_callback(stream: miniaudio.StreamInfo, buffer: bytes, samples: int):
+        nonlocal chunks  # Declare that we're using the outer function's variable
+        chunks.append((time.monotonic_ns(), buffer))
+        
+    with miniaudio.CaptureDevice(sample_rate=sample_rate, callback=record_miniaudio_callback) as device:
+        device.start()
+        while True:  # Replace with your condition for when to stop
+            if chunks:
+                yield chunks.pop(0)
+
+
 def record_udp(
     port: int,
     state: State,

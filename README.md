@@ -128,6 +128,18 @@ Use`--volume-multiplier <VM>` to multiply volume by `<VM>` so 2.0 would be twice
 If your Home Assistant server uses https, you will need to add `--protocol https` to your command.
 
 
+### Pyminiaudio / Miniaudio
+
+Enable [Pyminiaudio](https://pypi.org/project/miniaudio/) /
+[Miniaudio](https://miniaud.io) support with:
+
+``` sh
+.venv/bin/pip3 install .[miniaudio]
+```
+
+Use `--miniaudio` to record and play audio via Miniaudio
+
+
 ### PulseAudio / PipeWire
 
 Enable [PulseAudio](https://www.freedesktop.org/wiki/Software/PulseAudio/) /

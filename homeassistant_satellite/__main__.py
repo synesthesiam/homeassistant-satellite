@@ -22,6 +22,7 @@ from .mic import (
     RATE,
     SAMPLES_PER_CHUNK,
     WIDTH,
+    record_miniaudio,
     record_pulseaudio,
     record_subprocess,
     record_udp,
@@ -30,6 +31,7 @@ from .remote import stream
 from .snd import (
     APLAY_WITH_DEVICE,
     DEFAULT_APLAY,
+    play_miniaudio,
     play_pulseaudio,
     play_subprocess,
     play_udp,
@@ -130,6 +132,11 @@ async def main() -> None:
     parser.add_argument("--auto-gain", type=int, default=0, choices=list(range(32)))
     parser.add_argument("--volume-multiplier", type=float, default=1.0)
     #
+    parser.add_argument(
+        "--miniaudio",
+        action="store_true",
+        help="Use pyminiaudio for audio recording and playback",
+    )
     parser.add_argument(
         "--pulseaudio",
         nargs="?",
@@ -333,7 +340,10 @@ def _mic_proc(
             vad = SileroVoiceActivityDetector(args.vad_model)
             _LOGGER.debug("Using silero VAD")
 
-        if args.udp_mic is not None:
+        if args.miniaudio:
+            # Miniaudio
+            mic_stream = record_miniaudio()
+        elif args.udp_mic is not None:
             # UDP socket
             mic_stream = record_udp(args.udp_mic, state)
         elif args.pulseaudio is not None:
@@ -443,7 +453,13 @@ def _playback_proc(
     state: State,
 ) -> None:
     try:
-        if args.udp_snd is not None:
+        if args.miniaudio:
+            # Miniaudio
+            play_ctx = play_miniaudio(
+                sample_rate=RATE,
+                volume=args.volume,
+            )
+        elif args.udp_snd is not None:
             # UDP socket
             play_ctx = play_udp(
                 udp_port=args.udp_snd,
