@@ -194,6 +194,14 @@ async def main() -> None:
     args.mic_command = shlex.split(args.mic_command)
     args.snd_command = shlex.split(args.snd_command)
 
+    if not os.path.isfile(args.awake_sound):
+        _LOGGER.fatal("--awake-sound points to non-existing file")
+        sys.exit(1)
+
+    if not os.path.isfile(args.done_sound):
+        _LOGGER.fatal("--done-sound points to non-existing file")
+        sys.exit(1)
+
     if args.ducking_volume and not args.pulseaudio:
         _LOGGER.fatal("--ducking-volume only available with --pulseaudio")
         sys.exit(1)
