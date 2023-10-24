@@ -246,6 +246,44 @@ def play_pulseaudio(
                 pactl.sink_input_volume_set(index=ducked_index, vol=ducked_volume)
 
 
+@contextlib.contextmanager
+def play_pyaudio(
+    sample_rate: int,
+    volume: float = 1.0,
+):
+    """Uses PyAudio to play a URL to an audio output device."""
+    try:
+        import pyaudio 
+    except ImportError:
+        _LOGGER.fatal("Please pip install homeassistant_satellite[pyaudio]")
+        raise
+    
+    p = pyaudio.PyAudio()
+    
+    # Open a new audio stream
+    stream = p.open(
+        format=pyaudio.paInt16,
+        channels=1,
+        rate=sample_rate,
+        output=True
+    )
+
+    def play(media: str):
+        with contextlib.closing(
+            media_to_chunks(media=media, sample_rate=sample_rate, volume=volume)
+        ) as chunks:
+            for chunk in chunks:
+                stream.write(chunk)
+
+    try:
+        yield play, duck_fail
+    finally:
+        # Close the audio stream
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
+
+
 def media_to_chunks(
     media: str,
     sample_rate: int,

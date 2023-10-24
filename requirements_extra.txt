@@ -3,3 +3,4 @@ numpy<1.26
 webrtc-noise-gain==1.2.3
 pasimple>=0.0.2
 pulsectl>=23.5.2
+PyAudio==0.2.13

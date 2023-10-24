@@ -148,6 +148,20 @@ When using PulseAudio, ducking and acoustic echo cancelation are available to fa
 `--ducking=<vol>` sets the volume of all playback streams to `<vol>` (e.g., `0.2` for 20%) after the wake word is detected and until the pipeline finishes, making speech recognition easier.
 
 
+### PyAudio (works on MacOS)
+
+Enable [PyAudio](https://people.csail.mit.edu/hubert/pyaudio/) with:
+
+``` sh
+xcode-select --install
+brew remove portaudio
+brew install portaudio
+
+.venv/bin/pip3 install .[pyaudio]
+```
+
+Use `--pyaudio` to record and play audio via PyAudio.
+
 ## Running as a Service
 
 You can run homeassistant-satellite as a systemd service by first creating a service file:
