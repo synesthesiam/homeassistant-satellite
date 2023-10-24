@@ -194,11 +194,11 @@ async def main() -> None:
     args.mic_command = shlex.split(args.mic_command)
     args.snd_command = shlex.split(args.snd_command)
 
-    if not os.path.isfile(args.awake_sound):
+    if args.awake_sound and not os.path.isfile(args.awake_sound):
         _LOGGER.fatal("--awake-sound points to non-existing file")
         sys.exit(1)
 
-    if not os.path.isfile(args.done_sound):
+    if args.done_sound and not os.path.isfile(args.done_sound):
         _LOGGER.fatal("--done-sound points to non-existing file")
         sys.exit(1)
 
@@ -480,7 +480,14 @@ def _playback_proc(
         with play_ctx as (play, duck):
             for item in iter(playback_queue.get, None):
                 if isinstance(item, PlayMedia):
-                    play(item.media)
+                    try:
+                        play(item.media)
+                    except EOFError:
+                        pass  # expected when media item is empty ("never mind")
+                    except Exception:
+                        _LOGGER.exception(
+                            "Unexpected error playing media item: %s", item
+                        )
 
                 elif isinstance(item, SetMicState):
                     state.mic = item.mic_state
