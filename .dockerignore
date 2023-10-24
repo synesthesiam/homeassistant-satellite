@@ -6,3 +6,4 @@
 !homeassistant_satellite/VERSION
 !homeassistant_satellite/py.typed
 !setup.py
+!sounds/*
