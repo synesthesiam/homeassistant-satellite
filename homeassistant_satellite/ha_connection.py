@@ -1,11 +1,14 @@
-from asyncio import Queue
 import asyncio
 import logging
 import os
-from typing import AsyncGenerator, Dict, List
+from asyncio import Queue
+from typing import Any, AsyncGenerator, Dict, Optional
+
 import aiohttp
 
 _LOGGER = logging.getLogger()
+
+MessageType = Dict[Any, Any]
 
 
 class HAConnection:
@@ -29,13 +32,18 @@ class HAConnection:
         self._token = token
         self._message_id = 1
 
-        self._message_queues: Dict[int, Queue[dict]] = {}  # msg_id => queue of messages
+        self._message_queues: Dict[
+            int, Queue[Optional[MessageType]]
+        ] = {}  # msg_id => queue of messages
 
         ws_protocol = "wss" if protocol == "https" else "ws"
         url = f"{ws_protocol}://{host}:{port}/api/websocket"
 
         self._session = aiohttp.ClientSession()
         self._websocket_context = self._session.ws_connect(url)
+
+        self.__websocket: Optional[aiohttp.ClientWebSocketResponse] = None
+        self.__receive_loop_task: Optional[asyncio.Task] = None
 
     # Async context manager
     async def __aenter__(self):
@@ -50,6 +58,7 @@ class HAConnection:
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
+        assert self.__receive_loop_task is not None
         self.__receive_loop_task.cancel()
 
         await self._websocket_context.__aexit__(exc_type, exc, tb)
@@ -57,6 +66,7 @@ class HAConnection:
 
     async def __receive_loop(self) -> None:
         """Loop that receives and dispatches messages."""
+        assert self.__websocket is not None
 
         try:
             # Run until the task is cancelled
@@ -64,7 +74,8 @@ class HAConnection:
                 if msg.type == aiohttp.WSMsgType.ERROR:
                     _LOGGER.error("websocket connection error %s", msg)
                     break
-                elif msg.type != aiohttp.WSMsgType.TEXT:
+
+                if msg.type != aiohttp.WSMsgType.TEXT:
                     _LOGGER.warning("unknown message type received: %s", msg.type)
                     continue
 
@@ -75,21 +86,22 @@ class HAConnection:
                     await queue.put(message)
                 else:
                     _LOGGER.warning(
-                        f"no consumer for received message_id {message['id']}"
+                        "no consumer for received message_id %s", message["id"]
                     )
 
             _LOGGER.error("websocket connection closed")
 
             # we exit on every error, it's more robust to just restart than to try to recover
             # TODO: more precise error handling
-            os._exit(-1)
+            os._exit(-1)  # pylint: disable=protected-access
 
-        except asyncio.CancelledError as e:
+        except asyncio.CancelledError:
             _LOGGER.debug("WS receive loop finished")
 
     async def __authenticate(self) -> None:
         """Authenticate websocket connection to HA"""
 
+        assert self.__websocket is not None
         message = await self.__websocket.receive_json()
         assert message["type"] == "auth_required", message
 
@@ -107,23 +119,28 @@ class HAConnection:
             "Authenticated to Home Assistant version %s", message.get("ha_version")
         )
 
-    ### Public functions to communicate with HA #############################33
+    # -------------------------------------------------------------------------
+    # Public functions to communicate with HA
+    # -------------------------------------------------------------------------
 
-    async def send_and_receive(self, message: dict) -> dict:
+    async def send_and_receive(self, message: MessageType) -> MessageType:
         """Send JSON message and receives the response"""
 
         return await self.send_and_receive_many(message).__anext__()
 
-    async def send_and_receive_many(self, message: dict) -> AsyncGenerator[dict, None]:
+    async def send_and_receive_many(
+        self, message: MessageType
+    ) -> AsyncGenerator[MessageType, None]:
         """Send JSON message and receives all responses"""
 
+        assert self.__websocket is not None
         assert isinstance(message, dict), "Invalid WS message type"
 
         try:
             message["id"] = self._message_id
             self._message_id += 1
 
-            queue = Queue()
+            queue: Queue[Optional[MessageType]] = Queue()
             self._message_queues[message["id"]] = queue
 
             _LOGGER.debug("send_json() message=%s", message)
@@ -133,6 +150,10 @@ class HAConnection:
             while True:
                 response = await queue.get()
                 _LOGGER.debug("send_and_subscribe_json() response=%s", response)
+
+                if response is None:
+                    break
+
                 yield response
 
         finally:
@@ -142,4 +163,5 @@ class HAConnection:
     async def send_bytes(self, bts: bytes):
         """Send binary message (without response)"""
 
+        assert self.__websocket is not None
         await self.__websocket.send_bytes(bts)

@@ -6,27 +6,17 @@ import os
 import queue
 import shlex
 import shutil
+import socket
 import sys
 import threading
-import time
-import wave
-import socket
-from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple, Union
 
 from homeassistant_satellite.ha_connection import HAConnection
 
-from .mic_record import (
-    ARECORD_WITH_DEVICE,
-    DEFAULT_ARECORD,
-)
-from .mic_process import (
-    VAD_DISABLED,
-    WAKE_WORD_DISABLED,
-    mic_thread_entry,
-)
+from .mic_process import VAD_DISABLED, WAKE_WORD_DISABLED, mic_thread_entry
+from .mic_record import ARECORD_WITH_DEVICE, DEFAULT_ARECORD
 from .remote import stream
 from .snd import (
     APLAY_WITH_DEVICE,

@@ -7,10 +7,10 @@ import argparse
 import asyncio
 import logging
 import os
-from pathlib import Path
 import time
 import wave
 from collections import deque
+from pathlib import Path
 from typing import Deque, Final, Optional, Tuple
 
 from .mic_record import (
@@ -43,12 +43,12 @@ them, buffer them, etc. Chunks that exit the whole pipeline are streamed to HA.
 
 
 def __ensure_running_pipe(
-    input: MicStream,
+    mic_input: MicStream,
     state: State,
 ) -> MicStream:
     """Stops the recording pipeline when exiting."""
 
-    for ts_chunk in input:
+    for ts_chunk in mic_input:
         if not state.is_running:
             break
 
@@ -56,18 +56,18 @@ def __ensure_running_pipe(
 
 
 def _volume_multiplier_pipe(
-    input: MicStream,
+    mic_input: MicStream,
     volume_multiplier: float,
 ) -> MicStream:
     """Multiplies the volume of all passing chunks."""
 
-    for timestamp, chunk in input:
+    for timestamp, chunk in mic_input:
         chunk = multiply_volume(chunk, volume_multiplier)
         yield timestamp, chunk
 
 
 def _webrtc_pipe(
-    input: MicStream,
+    mic_input: MicStream,
     state: State,
     noise_suppression: int,
     auto_gain: int,
@@ -91,7 +91,7 @@ def _webrtc_pipe(
     ) == 0, "Audio chunks must be a multiple of 10ms"
     _LOGGER.debug("Using webrtc audio processing")
 
-    for timestamp, chunk in input:
+    for timestamp, chunk in mic_input:
         clean_chunk = bytes()
         ap_sub_chunks = len(chunk) // sub_chunk_bytes
         if (len(chunk) % sub_chunk_bytes) != 0:
@@ -113,7 +113,7 @@ def _webrtc_pipe(
 
 
 def _silero_pipe(
-    input: MicStream,
+    mic_input: MicStream,
     vad_model: str,
     state: State,
 ) -> MicStream:
@@ -124,7 +124,7 @@ def _silero_pipe(
     silero = SileroVoiceActivityDetector(vad_model)
     running = False
 
-    for timestamp, chunk in input:
+    for timestamp, chunk in mic_input:
         if state.mic == MicState.WAIT_FOR_VAD:
             running = True
             state.vad_prob = silero(chunk)
@@ -137,7 +137,7 @@ def _silero_pipe(
 
 
 def _vad_pipe(
-    input: MicStream,
+    mic_input: MicStream,
     vad_threshold: float,
     vad_trigger_level: int,
     vad_buffer_chunks: int,
@@ -156,7 +156,7 @@ def _vad_pipe(
     vad_activation: int = 0
     vad_chunk_buffer: Deque[Tuple[int, bytes]] = deque(maxlen=vad_buffer_chunks)
 
-    for ts_chunk in input:
+    for ts_chunk in mic_input:
         # If we're not waiting for VAD, just let the chunk pass through
         if state.mic != MicState.WAIT_FOR_VAD:
             yield ts_chunk
@@ -187,16 +187,16 @@ def _vad_pipe(
 
 
 def _skip_mic_state_pipe(
-    input: MicStream,
+    mic_input: MicStream,
     state: State,
     skip: MicState,
-    event: asyncio.Event | None = None,
+    event: Optional[asyncio.Event] = None,
 ):
     """Skips one MicState of the processing pipeline and continuous immediately to the next one.
     If event is not None it is set when the skip occurs.
     """
 
-    for ts_chunk in input:
+    for ts_chunk in mic_input:
         if state.mic == skip:
             state.mic = state.mic.next()
 
@@ -207,11 +207,11 @@ def _skip_mic_state_pipe(
 
 
 def _wyoming_wake_word_pipe(
-    input: MicStream,
+    mic_input: MicStream,
     state: State,
     wyoming_host: str,
     wyoming_port: int,
-    wake_word_id: str | None,
+    wake_word_id: Optional[str],
     event: asyncio.Event,
     loop: asyncio.AbstractEventLoop,
 ):
@@ -221,7 +221,7 @@ def _wyoming_wake_word_pipe(
         wake_word_id=wake_word_id,
         loop=loop,
     ) as wake:
-        for ts_chunk in input:
+        for ts_chunk in mic_input:
             # Detections arrive asyncronously, check whether the wake word is
             # already detected before processing the current chunks.
             if state.mic == MicState.WAIT_FOR_WAKE_WORD and wake.detected:
@@ -238,7 +238,7 @@ def _wyoming_wake_word_pipe(
 
 
 def _wav_writer_pipe(
-    input: MicStream,
+    mic_input: MicStream,
     state: State,
     debug_recording_dir: Path,
 ) -> MicStream:
@@ -247,7 +247,7 @@ def _wav_writer_pipe(
     wav_writer: Optional[wave.Wave_write] = None
     current_pipeline = -1
 
-    for timestamp, chunk in input:
+    for timestamp, chunk in mic_input:
         # wav_writer is installed after VAD so all the chunks we see are meant to be recorded.
         # Note that the state might go from RECORDING to RECORDING again in the next pipeline, so
         # we detect that the pipeline changed from state.pipeline_count.
@@ -294,16 +294,16 @@ def mic_thread_entry(
         # Then, depending on the given arguments, enable the corresponding pipes
         # to process the mic audio.
 
-        mic_stream = __ensure_running_pipe(input=mic_stream, state=state)
+        mic_stream = __ensure_running_pipe(mic_input=mic_stream, state=state)
 
         if args.volume_multiplier != 1.0:
             mic_stream = _volume_multiplier_pipe(
-                input=mic_stream, volume_multiplier=args.volume_multiplier
+                mic_input=mic_stream, volume_multiplier=args.volume_multiplier
             )
 
         if args.vad == "webrtcvad" or args.noise_suppression > 0 or args.auto_gain > 0:
             mic_stream = _webrtc_pipe(
-                input=mic_stream,
+                mic_input=mic_stream,
                 state=state,
                 noise_suppression=args.noise_suppression,
                 auto_gain=args.auto_gain,
@@ -312,14 +312,14 @@ def mic_thread_entry(
 
         if args.vad == "silero":
             mic_stream = _silero_pipe(
-                input=mic_stream,
+                mic_input=mic_stream,
                 state=state,
                 vad_model=args.vad_model,
             )
 
         if args.vad != VAD_DISABLED:
             mic_stream = _vad_pipe(
-                input=mic_stream,
+                mic_input=mic_stream,
                 state=state,
                 vad_threshold=args.vad_threshold,
                 vad_trigger_level=args.vad_trigger_level,
@@ -328,14 +328,14 @@ def mic_thread_entry(
         else:
             # No vad, skip it
             mic_stream = _skip_mic_state_pipe(
-                input=mic_stream,
+                mic_input=mic_stream,
                 state=state,
                 skip=MicState.WAIT_FOR_VAD,
             )
 
         if args.wake_word == "wyoming":
             mic_stream = _wyoming_wake_word_pipe(
-                input=mic_stream,
+                mic_input=mic_stream,
                 state=state,
                 wyoming_host=args.wyoming_host,
                 wyoming_port=args.wyoming_port,
@@ -346,7 +346,7 @@ def mic_thread_entry(
         else:
             # No wake word detection, skip it
             mic_stream = _skip_mic_state_pipe(
-                input=mic_stream,
+                mic_input=mic_stream,
                 state=state,
                 skip=MicState.WAIT_FOR_WAKE_WORD,
                 event=ready_to_stream,
@@ -354,7 +354,7 @@ def mic_thread_entry(
 
         if args.debug_recording_dir:
             mic_stream = _wav_writer_pipe(
-                input=mic_stream,
+                mic_input=mic_stream,
                 state=state,
                 debug_recording_dir=args.debug_recording_dir,
             )

@@ -1,23 +1,23 @@
-import logging
 import asyncio
-from asyncio import Queue, AbstractEventLoop
+import logging
 import os
-from typing import Tuple
+from asyncio import AbstractEventLoop, Queue
+from typing import Optional, Tuple
 
 _LOGGER = logging.getLogger()
 
 
 class WyomingWakeWordDetector:
     """Detects wake words using a wyoiming protocol server.
-    
+
     This class is used in the mic thread by syncronous code. However the main
     work is delegated to the async function _run_wyoming which runs in the main thread."""
 
     def __init__(
-        self, host: str, port: int, wake_word_id: str | None, loop: AbstractEventLoop
+        self, host: str, port: int, wake_word_id: Optional[str], loop: AbstractEventLoop
     ):
         try:
-            import wyoming
+            import wyoming  # noqa: F401
         except ImportError:
             _LOGGER.fatal("Please pip install homeassistant_satellite[wyoming]")
             raise
@@ -27,7 +27,7 @@ class WyomingWakeWordDetector:
         self._wake_word_id = wake_word_id
         self._loop = loop
         self._detected = False
-        self._queue: Queue | None = None
+        self._queue: Optional[Queue] = None
 
     def __enter__(self):
         return self
@@ -125,9 +125,9 @@ class WyomingWakeWordDetector:
                         audio_task = asyncio.create_task(self._queue.get())
                         pending.add(audio_task)
 
-        except:
+        except Exception:
             _LOGGER.exception("Error running wyoming wake word detection")
-            os._exit(-1)
+            os._exit(-1)  # pylint: disable=protected-access
 
     @property
     def detected(self) -> bool:
