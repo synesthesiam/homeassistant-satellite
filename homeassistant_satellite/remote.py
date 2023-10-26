@@ -16,11 +16,9 @@ async def stream(
     start_stage: str = "wake_word",
 ) -> AsyncGenerator[Tuple[int, str, Dict[str, Any]], None]:
     """Streams audio to an Assist pipeline and yields events as (timestamp, type, data)."""
-
     pipeline_id: Optional[str] = None
     if pipeline_name:
         pipeline_id = await _get_pipeline_id(ha_connection, pipeline_name)
-
     pipeline_events, handler_id = await _start_pipeline(
         ha_connection,
         pipeline_id,
