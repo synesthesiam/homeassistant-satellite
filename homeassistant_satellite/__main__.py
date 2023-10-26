@@ -15,7 +15,7 @@ from typing import Optional, Tuple, Union
 
 from homeassistant_satellite.ha_connection import HAConnection
 
-from .mic_process import VAD_DISABLED, WAKE_WORD_DISABLED, mic_thread_entry
+from .mic_process import VAD_DISABLED, WAKE_WORD_DISABLED, mic_task_entry
 from .mic_record import ARECORD_WITH_DEVICE, DEFAULT_ARECORD
 from .remote import stream
 from .snd import (
@@ -211,19 +211,15 @@ async def main() -> None:
         args.debug_recording_dir = Path(args.debug_recording_dir)
         args.debug_recording_dir.mkdir(parents=True, exist_ok=True)
 
-    loop = asyncio.get_running_loop()
     recording_queue: "asyncio.Queue[Tuple[int, bytes]]" = asyncio.Queue()
     playback_queue: "queue.Queue[PlaybackQueueItem]" = queue.Queue()
     ready_to_stream = asyncio.Event()
     state = State(mic=MicState.WAIT_FOR_VAD)
 
     # Recording thread for microphone
-    mic_thread = threading.Thread(
-        target=mic_thread_entry,
-        args=(args, loop, recording_queue, ready_to_stream, state),
-        daemon=True,
+    mic_task = asyncio.create_task(
+        mic_task_entry(args, recording_queue, ready_to_stream, state)
     )
-    mic_thread.start()
 
     # Playback thread
     playback_thread = threading.Thread(
@@ -256,7 +252,7 @@ async def main() -> None:
 
     finally:
         state.is_running = False
-        mic_thread.join()
+        await mic_task
         playback_queue.put_nowait(None)  # exit request
         playback_thread.join()
 
@@ -292,7 +288,7 @@ async def _run_pipeline(
         audio_seconds_to_buffer=args.wake_buffer_seconds,
         start_stage=("wake_word" if args.wake_word == WAKE_WORD_DISABLED else "stt"),
     ):
-        _LOGGER.warning("%s %s", event_type, event_data)
+        _LOGGER.debug("%s %s", event_type, event_data)
 
         if event_type == "wake_word-end":
             if args.ducking_volume is not None:

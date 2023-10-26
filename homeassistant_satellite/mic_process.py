@@ -11,7 +11,7 @@ import time
 import wave
 from collections import deque
 from pathlib import Path
-from typing import Deque, Final, Optional, Tuple
+from typing import Deque, Final, Optional
 
 from .mic_record import (
     CHANNELS,
@@ -19,6 +19,7 @@ from .mic_record import (
     SAMPLES_PER_CHUNK,
     WIDTH,
     MicStream,
+    TimestampChunk,
     record_pulseaudio,
     record_subprocess,
     record_udp,
@@ -42,31 +43,31 @@ them, buffer them, etc. Chunks that exit the whole pipeline are streamed to HA.
 """
 
 
-def __ensure_running_pipe(
+async def __ensure_running_pipe(
     mic_input: MicStream,
     state: State,
 ) -> MicStream:
     """Stops the recording pipeline when exiting."""
 
-    for ts_chunk in mic_input:
+    async for ts_chunk in mic_input:
         if not state.is_running:
             break
 
         yield ts_chunk
 
 
-def _volume_multiplier_pipe(
+async def _volume_multiplier_pipe(
     mic_input: MicStream,
     volume_multiplier: float,
 ) -> MicStream:
     """Multiplies the volume of all passing chunks."""
 
-    for timestamp, chunk in mic_input:
+    async for timestamp, chunk in mic_input:
         chunk = multiply_volume(chunk, volume_multiplier)
         yield timestamp, chunk
 
 
-def _webrtc_pipe(
+async def _webrtc_pipe(
     mic_input: MicStream,
     state: State,
     noise_suppression: int,
@@ -91,7 +92,7 @@ def _webrtc_pipe(
     ) == 0, "Audio chunks must be a multiple of 10ms"
     _LOGGER.debug("Using webrtc audio processing")
 
-    for timestamp, chunk in mic_input:
+    async for timestamp, chunk in mic_input:
         clean_chunk = bytes()
         ap_sub_chunks = len(chunk) // sub_chunk_bytes
         if (len(chunk) % sub_chunk_bytes) != 0:
@@ -112,7 +113,7 @@ def _webrtc_pipe(
         yield timestamp, clean_chunk
 
 
-def _silero_pipe(
+async def _silero_pipe(
     mic_input: MicStream,
     vad_model: str,
     state: State,
@@ -124,7 +125,7 @@ def _silero_pipe(
     silero = SileroVoiceActivityDetector(vad_model)
     running = False
 
-    for timestamp, chunk in mic_input:
+    async for timestamp, chunk in mic_input:
         if state.mic == MicState.WAIT_FOR_VAD:
             running = True
             state.vad_prob = silero(chunk)
@@ -136,7 +137,7 @@ def _silero_pipe(
         yield timestamp, chunk
 
 
-def _vad_pipe(
+async def _vad_pipe(
     mic_input: MicStream,
     vad_threshold: float,
     vad_trigger_level: int,
@@ -154,9 +155,9 @@ def _vad_pipe(
     """
 
     vad_activation: int = 0
-    vad_chunk_buffer: Deque[Tuple[int, bytes]] = deque(maxlen=vad_buffer_chunks)
+    vad_chunk_buffer: Deque[TimestampChunk] = deque(maxlen=vad_buffer_chunks)
 
-    for ts_chunk in mic_input:
+    async for ts_chunk in mic_input:
         # If we're not waiting for VAD, just let the chunk pass through
         if state.mic != MicState.WAIT_FOR_VAD:
             yield ts_chunk
@@ -186,7 +187,7 @@ def _vad_pipe(
             vad_chunk_buffer.clear()
 
 
-def _skip_mic_state_pipe(
+async def _skip_mic_state_pipe(
     mic_input: MicStream,
     state: State,
     skip: MicState,
@@ -196,7 +197,7 @@ def _skip_mic_state_pipe(
     If event is not None it is set when the skip occurs.
     """
 
-    for ts_chunk in mic_input:
+    async for ts_chunk in mic_input:
         if state.mic == skip:
             state.mic = state.mic.next()
 
@@ -206,22 +207,20 @@ def _skip_mic_state_pipe(
         yield ts_chunk
 
 
-def _wyoming_wake_word_pipe(
+async def _wyoming_wake_word_pipe(
     mic_input: MicStream,
     state: State,
     wyoming_host: str,
     wyoming_port: int,
     wake_word_id: Optional[str],
     event: asyncio.Event,
-    loop: asyncio.AbstractEventLoop,
 ):
-    with WyomingWakeWordDetector(
+    async with WyomingWakeWordDetector(
         host=wyoming_host,
         port=wyoming_port,
         wake_word_id=wake_word_id,
-        loop=loop,
     ) as wake:
-        for ts_chunk in mic_input:
+        async for ts_chunk in mic_input:
             # Detections arrive asyncronously, check whether the wake word is
             # already detected before processing the current chunks.
             if state.mic == MicState.WAIT_FOR_WAKE_WORD and wake.detected:
@@ -232,12 +231,12 @@ def _wyoming_wake_word_pipe(
                 event.set()
 
             if state.mic == MicState.WAIT_FOR_WAKE_WORD:
-                wake.process_chunk(ts_chunk)
+                await wake.process_chunk(ts_chunk)
             else:
                 yield ts_chunk
 
 
-def _wav_writer_pipe(
+async def _wav_writer_pipe(
     mic_input: MicStream,
     state: State,
     debug_recording_dir: Path,
@@ -247,7 +246,7 @@ def _wav_writer_pipe(
     wav_writer: Optional[wave.Wave_write] = None
     current_pipeline = -1
 
-    for timestamp, chunk in mic_input:
+    async for timestamp, chunk in mic_input:
         # wav_writer is installed after VAD so all the chunks we see are meant to be recorded.
         # Note that the state might go from RECORDING to RECORDING again in the next pipeline, so
         # we detect that the pipeline changed from state.pipeline_count.
@@ -264,16 +263,16 @@ def _wav_writer_pipe(
             wav_writer.setsampwidth(WIDTH)
             wav_writer.setnchannels(CHANNELS)
 
+        # TODO: Don't do I/O in the event loop
         assert wav_writer
         wav_writer.writeframes(chunk)
 
         yield timestamp, chunk
 
 
-def mic_thread_entry(
+async def mic_task_entry(
     args: argparse.Namespace,
-    loop: asyncio.AbstractEventLoop,
-    recording_queue: "asyncio.Queue[Tuple[int, bytes]]",
+    recording_queue: "asyncio.Queue[TimestampChunk]",
     ready_to_stream: asyncio.Event,
     state: State,
 ) -> None:
@@ -287,9 +286,9 @@ def mic_thread_entry(
         if args.udp_mic is not None:
             mic_stream = record_udp(args.udp_mic, state)
         elif args.pulseaudio is not None:
-            mic_stream = record_pulseaudio(args.pulseaudio, args.mic_device)
+            mic_stream = record_pulseaudio(args.pulseaudio, args.mic_device, state)
         else:
-            mic_stream = record_subprocess(args.mic_command)
+            mic_stream = record_subprocess(args.mic_command, state)
 
         # Then, depending on the given arguments, enable the corresponding pipes
         # to process the mic audio.
@@ -340,7 +339,6 @@ def mic_thread_entry(
                 wyoming_host=args.wyoming_host,
                 wyoming_port=args.wyoming_port,
                 wake_word_id=args.wake_word_id,
-                loop=loop,
                 event=ready_to_stream,
             )
         else:
@@ -360,9 +358,9 @@ def mic_thread_entry(
             )
 
         # Finally, the chunks passing through all pipes are ready to be streamed
-        for ts_chunk in mic_stream:
-            loop.call_soon_threadsafe(recording_queue.put_nowait, ts_chunk)
+        async for ts_chunk in mic_stream:
+            recording_queue.put_nowait(ts_chunk)
 
     except Exception:
-        _LOGGER.exception("Unexpected error in mic_thread_entry")
+        _LOGGER.exception("Unexpected error in mic_task_entry")
         os._exit(-1)  # pylint: disable=protected-access

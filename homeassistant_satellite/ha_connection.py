@@ -83,7 +83,7 @@ class HAConnection:
                 message = msg.json()
                 queue = self._message_queues.get(message["id"])
                 if queue is not None:
-                    await queue.put(message)
+                    queue.put_nowait(message)
                 else:
                     _LOGGER.warning(
                         "no consumer for received message_id %s", message["id"]
