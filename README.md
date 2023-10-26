@@ -123,6 +123,24 @@ Use`--auto-gain <AG>` to automatically increase the microphone volume (0-31 with
 
 Use`--volume-multiplier <VM>` to multiply volume by `<VM>` so 2.0 would be twice as loud (default: 1.0).
 
+### Wake word detection via a direct wyoming connection
+
+By default wake word detection is performed by forwarding audio to Home Assistant. It is also possible to perform wake word detection using a wyoming server,
+possibly (but not necessarily) running on the same machine as the satellite.
+
+To enable:
+``` sh
+.venv/bin/pip3 install .[wyoming]
+
+script/run ... --wake-word wyoming
+```
+
+Use `--wyoming-host <host>` to set the host of the wyoming server (default `localhost`).
+
+Use `--wyoming-port <port>` to set the port of the wyoming server (default `10400`).
+
+Use `--wake-word-id <id>` to detect a specific wake word instead of the server's default.
+
 ### HTTPS
 
 If your Home Assistant server uses https, you will need to add `--protocol https` to your command.

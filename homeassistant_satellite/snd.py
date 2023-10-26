@@ -5,7 +5,7 @@ import wave
 from time import sleep
 from typing import TYPE_CHECKING, Any, Dict, Final, Generator, List, Optional
 
-from .mic import APP_NAME
+from .mic_record import APP_NAME
 from .state import State
 
 DEFAULT_APLAY: Final = "aplay -r {rate} -c 1 -f S16_LE -t raw"

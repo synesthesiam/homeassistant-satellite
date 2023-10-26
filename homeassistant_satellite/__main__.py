@@ -14,20 +14,18 @@ import socket
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Deque, Final, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 from homeassistant_satellite.ha_connection import HAConnection
 
-from .mic import (
+from .mic_record import (
     ARECORD_WITH_DEVICE,
-    CHANNELS,
     DEFAULT_ARECORD,
-    RATE,
-    SAMPLES_PER_CHUNK,
-    WIDTH,
-    record_pulseaudio,
-    record_subprocess,
-    record_udp,
+)
+from .mic_process import (
+    VAD_DISABLED,
+    WAKE_WORD_DISABLED,
+    mic_thread_entry,
 )
 from .remote import stream
 from .snd import (
@@ -38,8 +36,6 @@ from .snd import (
     play_udp,
 )
 from .state import MicState, State
-from .util import multiply_volume
-from .vad import SileroVoiceActivityDetector, VoiceActivityDetector
 
 
 # items of the playback queue
@@ -60,7 +56,6 @@ class Duck:
 
 PlaybackQueueItem = Optional[Union[PlayMedia, SetMicState, Duck]]
 
-VAD_DISABLED = "disabled"
 _LOGGER = logging.getLogger(__name__)
 _DIR = Path(__file__).parent
 
@@ -132,6 +127,15 @@ async def main() -> None:
     )
     parser.add_argument("--auto-gain", type=int, default=0, choices=list(range(32)))
     parser.add_argument("--volume-multiplier", type=float, default=1.0)
+    #
+    parser.add_argument(
+        "--wake-word",
+        choices=(WAKE_WORD_DISABLED, "wyoming"),
+        default=WAKE_WORD_DISABLED,
+    )
+    parser.add_argument("--wake-word-id", type=str)
+    parser.add_argument("--wyoming-host", type=str, default="localhost")
+    parser.add_argument("--wyoming-port", type=int, default=10400)
     #
     parser.add_argument(
         "--pulseaudio",
@@ -220,20 +224,20 @@ async def main() -> None:
     loop = asyncio.get_running_loop()
     recording_queue: "asyncio.Queue[Tuple[int, bytes]]" = asyncio.Queue()
     playback_queue: "queue.Queue[PlaybackQueueItem]" = queue.Queue()
-    speech_detected = asyncio.Event()
+    ready_to_stream = asyncio.Event()
     state = State(mic=MicState.WAIT_FOR_VAD)
 
     # Recording thread for microphone
     mic_thread = threading.Thread(
-        target=_mic_proc,
-        args=(args, loop, recording_queue, speech_detected, state),
+        target=mic_thread_entry,
+        args=(args, loop, recording_queue, ready_to_stream, state),
         daemon=True,
     )
     mic_thread.start()
 
     # Playback thread
     playback_thread = threading.Thread(
-        target=_playback_proc,
+        target=_playback_thread_entry,
         args=(args, playback_queue, state),
         daemon=True,
     )
@@ -252,7 +256,7 @@ async def main() -> None:
                     args=args,
                     state=state,
                     ha_connection=ha_connection,
-                    speech_detected=speech_detected,
+                    ready_to_stream=ready_to_stream,
                     recording_queue=recording_queue,
                     playback_queue=playback_queue,
                 )
@@ -271,28 +275,32 @@ async def _run_pipeline(
     args,
     state: State,
     ha_connection: HAConnection,
-    speech_detected: asyncio.Event,
+    ready_to_stream: asyncio.Event,
     recording_queue: "asyncio.Queue[Tuple[int, bytes]]",
     playback_queue: "queue.Queue[PlaybackQueueItem]",
 ):
     """Run a single pipeline in the main thread"""
 
+    state.pipeline_count += 1
+
     if args.vad != VAD_DISABLED:
         _LOGGER.debug("Waiting for speech")
-        await speech_detected.wait()
-        speech_detected.clear()
+
+    # The ready_to_stream event fires when local processing is over and we are
+    # ready to stream audio to HA.
+    await ready_to_stream.wait()
+    ready_to_stream.clear()
 
     if not state.is_running:
         # Error in mic thread
         return
-
-    _LOGGER.warning("Speech detected")
 
     async for _timestamp, event_type, event_data in stream(
         ha_connection=ha_connection,
         audio=recording_queue,
         pipeline_name=args.pipeline,
         audio_seconds_to_buffer=args.wake_buffer_seconds,
+        start_stage=("wake_word" if args.wake_word == WAKE_WORD_DISABLED else "stt"),
     ):
         _LOGGER.warning("%s %s", event_type, event_data)
 
@@ -353,145 +361,7 @@ async def _run_pipeline(
 # -----------------------------------------------------------------------------
 
 
-def _mic_proc(
-    args: argparse.Namespace,
-    loop: asyncio.AbstractEventLoop,
-    audio_queue: "asyncio.Queue[Tuple[int, bytes]]",
-    speech_detected: asyncio.Event,
-    state: State,
-) -> None:
-    try:
-        audio_processor: "Optional[AudioProcessor]" = None
-        vad: Optional[VoiceActivityDetector] = None
-        vad_activation: int = 0
-        vad_chunk_buffer: Deque[Tuple[int, bytes]] = deque(
-            maxlen=args.vad_buffer_chunks
-        )
-        sub_chunk_samples: Final = 160
-        sub_chunk_bytes: Final = sub_chunk_samples * 2  # 16-bit
-        wav_writer: Optional[wave.Wave_write] = None
-
-        webrtc_vad = args.vad == "webrtcvad"
-        if webrtc_vad or (args.noise_suppression > 0) or (args.auto_gain > 0):
-            from webrtc_noise_gain import AudioProcessor
-
-            audio_processor = AudioProcessor(args.auto_gain, args.noise_suppression)
-
-            # Required so we don't need an extra buffer
-            assert (
-                SAMPLES_PER_CHUNK % sub_chunk_samples
-            ) == 0, "Audio chunks must be a multiple of 10ms"
-            _LOGGER.debug("Using webrtc audio processing")
-
-        if args.vad == "silero":
-            vad = SileroVoiceActivityDetector(args.vad_model)
-            _LOGGER.debug("Using silero VAD")
-
-        if args.udp_mic is not None:
-            # UDP socket
-            mic_stream = record_udp(args.udp_mic, state)
-        elif args.pulseaudio is not None:
-            # PulseAudio
-            mic_stream = record_pulseaudio(args.pulseaudio, args.mic_device)
-        else:
-            # External program
-            mic_stream = record_subprocess(args.mic_command)
-
-        for ts_chunk in mic_stream:
-            if not state.is_running:
-                break
-
-            timestamp, chunk = ts_chunk
-            vad_prob = 0.0
-
-            if args.volume_multiplier != 1.0:
-                chunk = multiply_volume(chunk, args.volume_multiplier)
-
-            # Process in 10ms sub-chunks.
-            if audio_processor is not None:
-                clean_chunk = bytes()
-                ap_sub_chunks = len(chunk) // sub_chunk_bytes
-                if (len(chunk) % sub_chunk_bytes) != 0:
-                    _LOGGER.warning("Mic chunk size is not a multiple of 10ms")
-
-                for sub_chunk_idx in range(ap_sub_chunks):
-                    sub_chunk_offset = sub_chunk_idx * sub_chunk_bytes
-                    result = audio_processor.Process10ms(
-                        chunk[sub_chunk_offset : (sub_chunk_offset + sub_chunk_bytes)]
-                    )
-
-                    clean_chunk += result.audio
-                    if webrtc_vad and result.is_speech:
-                        vad_prob = 1.0
-
-                # Overwrite with clean audio
-                chunk = clean_chunk
-                ts_chunk = (timestamp, clean_chunk)
-
-            if state.mic == MicState.WAIT_FOR_VAD:
-                if wav_writer is not None:
-                    wav_writer.close()
-                    wav_writer = None
-
-                if not (vad or webrtc_vad):
-                    # No VAD
-                    state.mic = MicState.RECORDING
-                else:
-                    if vad is not None:
-                        # silero
-                        vad_prob = vad(chunk)
-
-                    if vad_prob >= args.vad_threshold:
-                        vad_activation += 1
-                    else:
-                        vad_activation = max(0, vad_activation - 1)
-
-                    if vad_activation >= args.vad_trigger_level:
-                        state.mic = MicState.RECORDING
-                        speech_detected.set()
-
-                        if vad is not None:
-                            vad.reset()
-
-                        vad_activation = 0
-                    else:
-                        vad_chunk_buffer.append(ts_chunk)
-
-            if state.mic == MicState.RECORDING:
-                if args.debug_recording_dir and (wav_writer is None):
-                    # Save audio
-                    wav_writer = wave.open(
-                        str(args.debug_recording_dir / f"{time.monotonic_ns()}.wav"),
-                        "wb",
-                    )
-                    wav_writer.setframerate(RATE)
-                    wav_writer.setsampwidth(WIDTH)
-                    wav_writer.setnchannels(CHANNELS)
-
-                if vad_chunk_buffer:
-                    for buffered_chunk in vad_chunk_buffer:
-                        loop.call_soon_threadsafe(
-                            audio_queue.put_nowait, buffered_chunk
-                        )
-
-                        if wav_writer is not None:
-                            wav_writer.writeframes(buffered_chunk[1])
-
-                    vad_chunk_buffer.clear()
-
-                loop.call_soon_threadsafe(audio_queue.put_nowait, ts_chunk)
-                if wav_writer is not None:
-                    wav_writer.writeframes(ts_chunk[1])
-
-    except Exception:
-        _LOGGER.exception("Unexpected error in _mic_proc")
-        os._exit(-1)  # pylint: disable=protected-access
-
-
-# ----------------------------
-
-
-def _playback_proc(
+def _playback_thread_entry(
     args: argparse.Namespace,
     playback_queue: "queue.Queue[PlaybackQueueItem]",
     state: State,
@@ -544,7 +414,7 @@ def _playback_proc(
             return  # we got None from the queue, exit
 
     except Exception:
-        _LOGGER.exception("Sound error in _playback_proc")
+        _LOGGER.exception("Sound error in _playback_thread_entry")
         os._exit(-1)  # pylint: disable=protected-access
 
 
