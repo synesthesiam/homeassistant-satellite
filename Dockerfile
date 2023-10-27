@@ -23,6 +23,7 @@ COPY ./ ./
 
 RUN pip install --no-cache-dir .[webrtc]
 RUN pip install --no-cache-dir .[pulseaudio]
+RUN pip install --no-cache-dir .[wyoming]
 
 # silerovad can not be build on armv7l
 RUN uname -m | grep armv7l || pip install --no-cache-dir --find-links https://synesthesiam.github.io/prebuilt-apps/ .[silerovad]
