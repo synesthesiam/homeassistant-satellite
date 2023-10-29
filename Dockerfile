@@ -25,7 +25,7 @@ RUN pip install --no-cache-dir .[webrtc]
 RUN pip install --no-cache-dir .[pulseaudio]
 RUN pip install --no-cache-dir .[wyoming]
 
-# silerovad can not be build on armv7l
-RUN uname -m | grep armv7l || pip install --no-cache-dir --find-links https://synesthesiam.github.io/prebuilt-apps/ .[silerovad]
+# silerovad can not be installed on armv7l or x86 (i386) ignore the install error
+RUN pip install --no-cache-dir --find-links https://synesthesiam.github.io/prebuilt-apps/ .[silerovad] || true
 
 ENTRYPOINT [ "python", "-m", "homeassistant_satellite" ]
