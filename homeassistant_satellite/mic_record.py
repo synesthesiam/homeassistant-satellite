@@ -132,6 +132,9 @@ def _pulseaudio_thread_proc(
                 chunk = pa.read(samples_per_chunk * WIDTH)
                 ts_chunk = (time.monotonic_ns(), chunk)
                 loop.call_soon_threadsafe(queue.put_nowait, ts_chunk)
+
+            # allow the queue consumer to exit
+            loop.call_soon_threadsafe(queue.put_nowait, (time.monotonic_ns(), b""))
     except Exception:
         _LOGGER.exception("Unexpected error in pulseaudio recording thread")
 
