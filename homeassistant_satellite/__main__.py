@@ -69,6 +69,11 @@ async def main() -> None:
         choices=("http", "https"),
         help="Home Assistant protocol",
     )
+    parser.add_argument(
+        "--satellite-name",
+        default=socket.gethostname(),
+        help="A name to distinguish from other satellite instances",
+    )
     #
     parser.add_argument("--mic-device", help="Name of ALSA microphone device")
     parser.add_argument("--snd-device", help="Name of ALSA sound device")
@@ -333,7 +338,7 @@ async def _run_pipeline(
                         "type": "fire_event",
                         "event_type": "homeassistant_satellite_event",
                         "event_data": {
-                            "satellite_name": socket.gethostname(),
+                            "satellite_name": args.satellite_name,
                             "pipeline_event": {
                                 "type": event_type,
                                 "data": event_data,
