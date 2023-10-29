@@ -166,6 +166,28 @@ When using PulseAudio, ducking and acoustic echo cancelation are available to fa
 `--ducking=<vol>` sets the volume of all playback streams to `<vol>` (e.g., `0.2` for 20%) after the wake word is detected and until the pipeline finishes, making speech recognition easier.
 
 
+### Assist in progress sensor
+
+The satellite fires the event `homeassistant_satellite_event` when each step of
+the pipeline finishes. We can use this to create a [trigger-based template sensor](https://www.home-assistant.io/integrations/template/#trigger-based-template-binary-sensors-buttons-images-numbers-selects-and-sensors)
+showing when assist is in progress in this satellite:
+
+```yaml
+template:
+  - binary_sensor:
+      name: <name> assist in progress
+      state: '{{ trigger.event.data.pipeline_event.type != "run-end" }}'
+    trigger:
+      platform: event
+      event_type: homeassistant_satellite_event
+      event_data:
+        satellite_name: <name>
+```
+
+Use `--satellite-name <name>` to set a name for the satellite to distinguish it
+from other instances (defaults to the machine hostname).
+
+
 ## Running as a Service
 
 You can run homeassistant-satellite as a systemd service by first creating a service file:
