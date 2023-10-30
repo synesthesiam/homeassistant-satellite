@@ -28,7 +28,7 @@ class HAConnection:
     messages arrive in different order.
     """
 
-    def __init__(self, host: str, protocol: str, token: str, port: int = 8123):
+    def __init__(self, host: str, protocol: str, token: str, port: int = 8123, skipVerify: bool = False):
         self._token = token
         self._message_id = 1
 
@@ -38,8 +38,11 @@ class HAConnection:
 
         ws_protocol = "wss" if protocol == "https" else "ws"
         url = f"{ws_protocol}://{host}:{port}/api/websocket"
+        if skipVerify:
+            self._session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(verify_ssl=False))
+        else:
+            self._session = aiohttp.ClientSession()
 
-        self._session = aiohttp.ClientSession()
         self._websocket_context = self._session.ws_connect(url)
 
         self.__websocket: Optional[aiohttp.ClientWebSocketResponse] = None

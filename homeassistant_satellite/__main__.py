@@ -69,6 +69,7 @@ async def main() -> None:
         choices=("http", "https"),
         help="Home Assistant protocol",
     )
+    parser.add_argument("--skipVerify", action="store_false", help="Skip verification of the SSL certificate")
     #
     parser.add_argument("--mic-device", help="Name of ALSA microphone device")
     parser.add_argument("--snd-device", help="Name of ALSA sound device")
@@ -235,6 +236,7 @@ async def main() -> None:
             host=args.host,
             protocol=args.protocol,
             port=args.port,
+            skipVerify=args.skipVerify,
             token=token,
         ) as ha_connection:
             while state.is_running:
