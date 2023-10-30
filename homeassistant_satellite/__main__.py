@@ -69,7 +69,7 @@ async def main() -> None:
         choices=("http", "https"),
         help="Home Assistant protocol",
     )
-    parser.add_argument("--skipVerify", type=bool, help="Skip verification of the SSL certificate")
+    parser.add_argument("--skipVerify", action="store_true", type=bool, help="Skip verification of the SSL certificate")
     #
     parser.add_argument("--mic-device", help="Name of ALSA microphone device")
     parser.add_argument("--snd-device", help="Name of ALSA sound device")
