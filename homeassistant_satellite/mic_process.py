@@ -361,6 +361,9 @@ async def mic_task_entry(
         async for ts_chunk in mic_stream:
             recording_queue.put_nowait(ts_chunk)
 
+        if state.is_running:
+            raise Exception("Recording stopped while satellite is running")
+
     except Exception:
         _LOGGER.exception("Unexpected error in mic_task_entry")
         os._exit(-1)  # pylint: disable=protected-access
