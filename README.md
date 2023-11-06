@@ -128,6 +128,9 @@ Use`--volume-multiplier <VM>` to multiply volume by `<VM>` so 2.0 would be twice
 By default wake word detection is performed by forwarding audio to Home Assistant. It is also possible to perform wake word detection using a wyoming server,
 possibly (but not necessarily) running on the same machine as the satellite.
 
+First, ensure you have a wyoming server running. See
+[Wyoming openWakeWord](https://github.com/rhasspy/wyoming-openwakeword) for instructions.
+
 To enable:
 ``` sh
 .venv/bin/pip3 install .[wyoming]
