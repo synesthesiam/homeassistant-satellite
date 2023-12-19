@@ -160,6 +160,12 @@ async def main() -> None:
     parser.add_argument(
         "--debug", action="store_true", help="Print DEBUG messages to the console"
     )
+    #
+    parser.add_argument(
+        "--send-all-events",
+        action="store_true",
+        help="Report back all received pipeline events to the homeassistant_satellite_event event",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
     _LOGGER.debug(args)
@@ -323,9 +329,9 @@ async def _run_pipeline(
         # event to let the world know about our state. Skip consecutive same
         # events (mainly consecutive run-ends).
         if (
-            event_type in ["wake_word-end", "stt-end", "tts-end", "run-end"]
-            and event_type != state.last_event
-        ):
+            args.send_all_events
+            or event_type in ["wake_word-end", "stt-end", "tts-end", "run-end"]
+        ) and event_type != state.last_event:
             state.last_event = event_type
             asyncio.create_task(  # in background
                 ha_connection.send_and_receive(
