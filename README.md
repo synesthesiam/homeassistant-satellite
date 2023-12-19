@@ -1,4 +1,10 @@
-# Home Assistant Satellite
+# Deprecation Notice
+
+**NOTE**: Work has moved to the [wyoming-satellite](https://github.com/rhasspy/wyoming-satellite) project. This has better integration with Home Assistant, and is more modular with audio services.
+
+---
+
+## [DEPRECATED] Home Assistant Satellite
 
 Python-based satellite for [Assist](https://www.home-assistant.io/voice_control/) that streams audio to Home Assistant from a microphone.
 
