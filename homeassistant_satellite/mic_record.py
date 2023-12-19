@@ -133,10 +133,11 @@ def _pulseaudio_thread_proc(
                 ts_chunk = (time.monotonic_ns(), chunk)
                 loop.call_soon_threadsafe(queue.put_nowait, ts_chunk)
 
-            # allow the queue consumer to exit
-            loop.call_soon_threadsafe(queue.put_nowait, (time.monotonic_ns(), b""))
     except Exception:
         _LOGGER.exception("Unexpected error in pulseaudio recording thread")
+    finally:
+        # signal the queue consumer to exit
+        loop.call_soon_threadsafe(queue.put_nowait, (0, b""))
 
 
 async def record_pulseaudio(
@@ -157,4 +158,7 @@ async def record_pulseaudio(
 
     while state.is_running:
         ts_chunk = await queue.get()
+        if ts_chunk[0] == 0:
+            break
+
         yield ts_chunk
